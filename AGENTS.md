@@ -8,51 +8,25 @@ This document owns project-wide engineering rules for the ZeroForge codebase. De
 
 ## Agent Identity in GitHub Conversations
 
-- Every agent-authored GitHub issue, pull request, review, comment, or reply MUST begin with exactly one of these introductions:
-  - `Hey <model-name> here.`
-  - `t. <model-name>`
-- Use the exact model name exposed by the runtime. If the runtime does not expose a versioned model name, use the product identity `Codex`; never invent a model version.
-- Do not substitute role handles such as `validation-reviewer` for the model identity.
-- Never use the repository owner's personal name or GitHub login in agent-generated issues, pull requests, reviews, comments, commit messages, logs, or documentation.
-- Refer to the human owner only as `maintainer` or `operator`.
-- Do not fabricate real identities, use personal identifiers, or create an `@mention` unless the operator explicitly requests it.
-- GitHub's platform attribution may still show the authenticated account; these rules govern the text agents generate.
+- Every agent-authored GitHub issue, pull request, review, comment, or reply MUST start with `Hey <model-name> here.` or `t. <model-name>`.
+- Use the exact runtime model name. If unavailable, use `Codex`; never invent a version or substitute a role handle.
+- Never use the repository owner's personal name or login in agent-generated GitHub text, commits, logs, or documentation; refer to them only as `maintainer` or `operator`.
+- Do not fabricate identities or personal identifiers, or create an `@mention`, unless the operator requests it. Platform attribution is outside this rule.
 
 ## Distributed Agent Coordination and GitHub Flow
 
-- Assume multiple agents are working concurrently from different computers, sessions, clones, branches, and worktrees.
-- Never treat local filesystem, branch, issue, review, or test state as globally current or exclusively owned.
-- GitHub is the coordination source of truth: remote branches, issues, pull requests, comments, review threads, and CI status.
-- All repository changes MUST use GitHub flow. Never commit directly to `master`.
-- Before starting work:
-  1. fetch or inspect the current remote `master`;
-  2. read the linked issue and its latest comments;
-  3. inspect open pull requests and issues for duplicate or overlapping work;
-  4. inspect remote branches when the task may already be in progress;
-  5. announce or confirm the intended scope in the relevant GitHub thread.
-- Create a unique branch from current `master`. Prefer `<model-slug>/<issue-number>-<task-slug>-<short-id>` so concurrent agents do not collide.
-- Do not reuse, reset, force-push, delete, or overwrite another agent's branch. Do not amend commits that another agent may already have based work on.
-- Keep each branch and pull request focused on one issue or coherent change.
-- Run relevant tests before committing. A commit is allowed only when those tests pass. For documentation-only changes, inspect the rendered Markdown/diff and rely on PR CI for the repository gate.
-- Push the branch and open a draft pull request early enough for other agents to discover the work. Link the issue and state the files/scope being changed.
-- Put coordination updates, blockers, design decisions, and review responses in the issue or pull request—not only in a local session.
-- Immediately before pushing, reviewing, replying, or merging, refresh the relevant GitHub state because another agent may have changed it.
-- If overlapping work is discovered, stop making conflicting edits and coordinate in the GitHub thread. Reuse or build on the existing branch only when its owner or the operator explicitly authorizes it.
+- Assume multiple agents work concurrently across computers, sessions, clones, branches, and worktrees. GitHub remote state is the source of truth.
+- Before acting or posting, refresh `master`, the linked issue or PR and its comments/threads, related open issues/PRs/branches, and current CI.
+- Use GitHub flow: never commit to `master`; create a unique branch from current `master` (prefer `<model-slug>/<issue-number>-<task-slug>-<short-id>`), keep one focused PR, and open it as a draft early.
+- Relevant tests must pass before committing. For documentation-only changes, inspect the Markdown and diff; repository CI remains the merge gate.
+- Put scope, blockers, decisions, and review responses in the relevant GitHub thread. If work overlaps, stop conflicting edits and coordinate there.
+- Never reuse, reset, force-push, delete, overwrite, or amend another agent's branch or commits without explicit authorization.
 - Never merge until the current-head CI requirements in this file pass.
 
 ## GitHub-Aware Code Review
 
-- A code review is not limited to the local diff. Reviewers MUST inspect:
-  - the pull request body and complete patch;
-  - linked issues and their latest comments;
-  - current PR conversation, reviews, and unresolved review threads;
-  - current CI/check state for the PR head SHA;
-  - related or overlapping open pull requests and issues.
-- If the review starts from an issue, inspect its linked or candidate pull requests. If it starts from a pull request, inspect its linked issue and nearby issues that may change the intended scope.
-- Re-fetch GitHub state immediately before posting the review so findings do not duplicate work already addressed by another agent.
-- Post actionable review findings or answers to the relevant GitHub issue or pull request thread. Do not leave the result only in local chat.
-- Every posted review or reply must follow the model-identity introduction rule above.
-- Cite concrete files, lines, checks, commits, or issue requirements. Clearly separate blocking findings from non-blocking suggestions.
+- Reviews MUST inspect the PR body and full patch, linked issues and latest comments, the PR conversation and unresolved threads, current-head CI, and related open PRs/issues.
+- Re-fetch GitHub state before posting. Post actionable findings or answers to the relevant thread using the required introduction, cite concrete files, lines, checks, commits, or requirements, and separate blockers from suggestions.
 
 ## Project
 
