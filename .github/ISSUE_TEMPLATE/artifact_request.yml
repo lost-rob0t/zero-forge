@@ -1,0 +1,103 @@
+name: Security artifact request
+description: Request an authorized-testing artifact or generation workflow
+title: "[Artifact]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Provide primary evidence and a deterministic success condition. Do not include credentials or data from unauthorized targets.
+
+  - type: dropdown
+    id: artifact_type
+    attributes:
+      label: Artifact type
+      options:
+        - Metasploit exploit module
+        - ZAP active scan rule
+        - ZAP passive scan rule
+        - Binary exploitation workflow
+        - Input parser or policy handler
+        - Validation tool
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: identifier
+    attributes:
+      label: Vulnerability identifier
+      description: CVE, advisory, challenge, or internal tracking ID.
+      placeholder: CVE-YYYY-NNNN
+
+  - type: textarea
+    id: sources
+    attributes:
+      label: Primary sources
+      description: Link advisories, patches, source code, commits, fixtures, or write-ups. Distinguish confirmed facts from assumptions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: affected
+    attributes:
+      label: Affected product and versions
+      description: State confirmed vulnerable versions, fixed versions, platform constraints, and required configuration.
+    validations:
+      required: true
+
+  - type: textarea
+    id: vulnerability
+    attributes:
+      label: Vulnerability mechanics
+      description: Describe the vulnerable path, attacker-controlled input, sink, preconditions, and resulting primitive.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction environment
+      description: Describe the local lab, fixture, container, binary, service configuration, or challenge setup.
+    validations:
+      required: true
+
+  - type: textarea
+    id: inputs
+    attributes:
+      label: Supplied inputs
+      description: List available source, ELF, libc, loader, patch diff, traffic, PoC, credentials for the lab, and expected file locations.
+
+  - type: textarea
+    id: success
+    attributes:
+      label: Success condition
+      description: Define the exact output or behavior that proves the artifact works.
+      placeholder: The isolated test service returns the marker string and the run exits successfully.
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation requirements
+      description: Specify syntax, import, runtime, repeatability, negative-case, crash/core, or container checks.
+    validations:
+      required: true
+
+  - type: textarea
+    id: assumptions
+    attributes:
+      label: Known assumptions and unknowns
+      description: Record unresolved offsets, mitigations, version dependencies, timing, permissions, or environmental assumptions.
+
+  - type: checkboxes
+    id: authorization
+    attributes:
+      label: Scope confirmation
+      options:
+        - label: This request is for a controlled lab, CTF, owned system, or explicitly authorized assessment.
+          required: true
+        - label: No credentials, tokens, or private third-party target data are included.
+          required: true
+        - label: The issue defines a deterministic success condition.
+          required: true

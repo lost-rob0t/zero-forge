@@ -6,6 +6,15 @@ ZeroForge is an LLM-based exploit-development harness for security artifact gene
 
 This document owns project-wide engineering rules for the ZeroForge codebase. Detailed contracts for subtrees should live in child `AGENTS.md` files when durable boundaries emerge.
 
+## Agent Conversation Identities
+
+- Never use the repository owner's personal name or GitHub login in agent-generated issues, pull requests, reviews, comments, commit messages, logs, or documentation.
+- Use a stable role handle when a conversation needs named speakers. Approved handles are `forge-maintainer`, `validation-reviewer`, `workflow-reviewer`, `tooling-reviewer`, and `ci-reviewer`.
+- Prefix conversational GitHub text with the selected handle, for example: `**validation-reviewer:** The file parses as Ruby but defines no module class.`
+- Keep one handle per agent for the lifetime of a thread. Refer to the human owner only as `maintainer` or `operator`.
+- Do not fabricate real identities, use personal identifiers, or create an `@mention` unless the operator explicitly requests it.
+- GitHub's platform attribution may still show the authenticated account; these rules govern the text agents generate.
+
 ## Project
 
 - Stack: Python 3.12+, LangGraph, Pydantic v2, Typer, Rich, LiteLLM, PyYAML.
@@ -56,6 +65,13 @@ This document owns project-wide engineering rules for the ZeroForge codebase. De
 - When changing config: update `config.py`, `config.example.yaml`, env var table in `README.md`, and `test_config.py`.
 - Clean up temp files, caches, and background processes you create.
 
+## Pull Request Merge Gate
+
+- Never merge a pull request or enable auto-merge until every required CI job has succeeded on the pull request's current head SHA.
+- Required CI jobs are `lint`, `type-check`, `test (3.12)`, and `test (3.13)` from the `CI` workflow.
+- A pending, skipped, cancelled, timed-out, action-required, neutral, or failed job is not a pass.
+- If the pull request head changes, discard the previous result and wait for CI to succeed again.
+
 ## Verification
 
 - Run targeted tests: `pytest tests/test_<module>.py -v`
@@ -77,7 +93,6 @@ Ask before:
 
 - Modifying `pyproject.toml` or adding dependencies.
 - Editing `.github/workflows/`.
-- Creating commits or pushing branches.
 - Deleting files outside of `output/` or temp directories.
 
 ## Child DOX Index
