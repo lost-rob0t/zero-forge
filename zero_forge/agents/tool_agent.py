@@ -33,11 +33,20 @@ class ToolAgent:
         except Exception as e:
             ctx.extra_notes = f"CVE lookup failed: {e}"
 
-        # Read source files
+        # Read source files (categorized: documentation first, then config, data, code)
         if vuln_input.source_path:
             try:
                 files = self.registry.call("read_source_files", source_path=vuln_input.source_path)
                 ctx.source_files = [SourceFile(**f) for f in files]
+
+                # Auto-extract documentation into writeup_text if none was provided
+                if not vuln_input.writeup_text:
+                    doc_parts: list[str] = []
+                    for sf in ctx.source_files:
+                        if sf.category == "documentation":
+                            doc_parts.append(f"## {sf.filename}\n\n{sf.content[:8000]}")
+                    if doc_parts:
+                        ctx.writeup_text = "\n\n---\n\n".join(doc_parts)
             except Exception as e:
                 ctx.extra_notes += f"\nSource read failed: {e}"
 

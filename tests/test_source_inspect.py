@@ -5,6 +5,8 @@ import tempfile
 from pathlib import Path
 
 from zero_forge.tools.source_inspect import (
+    _categorize_file,
+    _detect_language,
     git_diff_inspect,
     read_source_files,
     search_code,
@@ -21,6 +23,8 @@ def test_read_source_files_single():
         assert len(results) == 1
         assert "hello" in results[0]["content"]
         assert results[0]["language"] == "python"
+        assert results[0]["category"] == "code"
+        assert results[0]["filename"] == os.path.basename(path)
     finally:
         os.unlink(path)
 
@@ -47,6 +51,65 @@ def test_read_source_files_max_files():
             (Path(tmpdir) / f"file_{i}.py").write_text(f"# file {i}\n")
         results = read_source_files(tmpdir, max_files=3)
         assert len(results) == 3
+
+
+def test_documentation_files_prioritized():
+    """README.md should appear before .py files in results."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "README.md").write_text("# My Project\nVulnerable software X\n")
+        (Path(tmpdir) / "exploit.py").write_text("print('exploit')\n")
+        (Path(tmpdir) / "config.json").write_text('{"name": "test"}\n')
+        results = read_source_files(tmpdir)
+        assert len(results) == 3
+        # Documentation should be first
+        assert results[0]["category"] == "documentation"
+        assert results[0]["filename"] == "README.md"
+        # Config should be second
+        assert results[1]["category"] == "config"
+        # Code should be last
+        assert results[2]["category"] == "code"
+
+
+def test_non_code_files_read():
+    """Non-code files (.md, .json, .txt) should be read and categorized."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "README.md").write_text("# Docs\n")
+        (Path(tmpdir) / "requirements.txt").write_text("requests\n")
+        (Path(tmpdir) / "settings.json").write_text('{}')
+        results = read_source_files(tmpdir)
+        assert len(results) == 3
+        cats = {r["category"] for r in results}
+        assert "documentation" in cats
+        assert "config" in cats
+
+
+def test_categorize_file():
+    assert _categorize_file("README.md") == "documentation"
+    assert _categorize_file("CHANGELOG.txt") == "documentation"
+    assert _categorize_file("readme") == "documentation"
+    assert _categorize_file("config.json") == "config"
+    assert _categorize_file("settings.yaml") == "config"
+    assert _categorize_file("data.csv") == "data"
+    assert _categorize_file("exploit.py") == "code"
+    assert _categorize_file("module.rb") == "code"
+
+
+def test_detect_language_non_code():
+    assert _detect_language("README.md") == "markdown"
+    assert _detect_language("notes.txt") == "text"
+    assert _detect_language("config.json") == "json"
+    assert _detect_language("app.cfm") == "cfml"
+    assert _detect_language("unknown.xyz") == "unknown"
+
+
+def test_binary_files_skipped():
+    """Binary files should be skipped, not included in results."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "README.md").write_text("docs")
+        (Path(tmpdir) / "image.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        results = read_source_files(tmpdir)
+        assert len(results) == 1
+        assert results[0]["filename"] == "README.md"
 
 
 def test_search_code_match():
