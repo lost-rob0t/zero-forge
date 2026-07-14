@@ -155,6 +155,7 @@ def test_git_diff_inspect_empty():
     assert result["additions"] == 0
     assert result["deletions"] == 0
 
+
 def test_git_diff_inspect_preserves_filename_beginning_with_b():
     diff = """diff --git a/bbb.py b/bbb.py
 --- a/bbb.py
