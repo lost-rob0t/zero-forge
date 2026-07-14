@@ -1,6 +1,7 @@
 """Tests for ZeroForge tool registry."""
 
 import pytest
+
 from zero_forge.tools.registry import ToolRegistry, create_default_registry
 
 

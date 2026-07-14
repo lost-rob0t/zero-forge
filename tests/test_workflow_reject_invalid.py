@@ -71,14 +71,14 @@ def _make_artifact(content: str = _VALID_CONTENT) -> Artifact:
 def _make_state(**overrides):
     from zero_forge.schemas import WorkflowState
 
-    defaults = dict(
-        vuln_input=_make_vuln_input(),
-        context=_make_context(),
-        artifact=_make_artifact(),
-        validation=ValidationResult(is_valid=True),
-        repair_attempts=0,
-        max_repair_attempts=3,
-    )
+    defaults = {
+        "vuln_input": _make_vuln_input(),
+        "context": _make_context(),
+        "artifact": _make_artifact(),
+        "validation": ValidationResult(is_valid=True),
+        "repair_attempts": 0,
+        "max_repair_attempts": 3,
+    }
     defaults.update(overrides)
     return WorkflowState(**defaults)
 

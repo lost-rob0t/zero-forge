@@ -85,10 +85,10 @@ def _safe_resolve(output_root: Path, filename: str) -> Path:
 
     try:
         destination.relative_to(resolved_root)
-    except ValueError:
+    except ValueError as exc:
         raise ArtifactPathError(
             f"Artifact destination escapes output directory: {destination}"
-        )
+        ) from exc
 
     if destination.exists() and not destination.is_file():
         raise ArtifactPathError(

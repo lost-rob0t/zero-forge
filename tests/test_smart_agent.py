@@ -1,6 +1,11 @@
 """Tests for the SmartAgent generate and repair functions."""
 
-from zero_forge.agents.smart_agent import generate_artifact, repair_artifact, _extract_code_block, _resolve_provider
+from zero_forge.agents.smart_agent import (
+    _extract_code_block,
+    _resolve_provider,
+    generate_artifact,
+    repair_artifact,
+)
 from zero_forge.schemas import (
     Artifact,
     ArtifactType,
