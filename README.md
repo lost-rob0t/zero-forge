@@ -65,16 +65,36 @@ python -m zero_forge.cli validate exploit.rb
 
 ## LLM Mode
 
-Set an API key to use LLM generation instead of stub mode:
+ZeroForge supports multiple LLM providers via LiteLLM. Provider priority: **OpenRouter > OpenAI > Anthropic > stub**.
+
+### OpenRouter (preferred)
+
+```bash
+export OPENROUTER_API_KEY=sk-or-...
+# Model name without prefix; ZeroForge auto-adds openrouter/
+export ZERO_FORGE_MODEL=meta-llama/llama-3-70b-instruct
+
+# Optional: custom OpenRouter-compatible base URL
+export OPENROUTER_BASE_URL=https://custom.endpoint/v1
+```
+
+### OpenAI
 
 ```bash
 export OPENAI_API_KEY=sk-...
-# or
-export ANTHROPIC_API_KEY=sk-...
-
-# Optional: specify model (default: gpt-4o-mini)
 export ZERO_FORGE_MODEL=gpt-4o
 ```
+
+### Anthropic
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+export ZERO_FORGE_MODEL=claude-3.5-sonnet
+```
+
+### Stub mode (default)
+
+No API key required — generates a minimal valid Metasploit module template.
 
 ## Testing
 

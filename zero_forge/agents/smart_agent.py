@@ -96,9 +96,40 @@ def _extract_code_block(text: str) -> str:
     return text.strip()
 
 
-def _call_llm(system_prompt: str, user_prompt: str) -> str:
-    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+def _resolve_provider() -> tuple[str | None, str, dict[str, str]]:
+    """Resolve which LLM provider to use and return (api_key, model, extra_kwargs).
+
+    Provider priority: OPENROUTER > OPENAI > ANTHROPIC > stub.
+    """
+    or_key = os.environ.get("OPENROUTER_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     model = os.environ.get("ZERO_FORGE_MODEL", "gpt-4o-mini")
+    extra_kwargs: dict[str, str] = {}
+
+    if or_key:
+        # Ensure model has openrouter/ prefix for LiteLLM routing
+        if not model.startswith("openrouter/"):
+            model = f"openrouter/{model}"
+        # Optional custom base URL (e.g. self-hosted OpenRouter-compatible endpoint)
+        base_url = os.environ.get("OPENROUTER_BASE_URL")
+        if base_url:
+            extra_kwargs["api_base"] = base_url
+        return or_key, model, extra_kwargs
+
+    if openai_key:
+        return openai_key, model, extra_kwargs
+
+    if anthropic_key:
+        if not model.startswith("anthropic/"):
+            model = f"anthropic/{model}"
+        return anthropic_key, model, extra_kwargs
+
+    return None, model, extra_kwargs
+
+
+def _call_llm(system_prompt: str, user_prompt: str) -> str:
+    api_key, model, extra_kwargs = _resolve_provider()
     if not api_key:
         return _stub_metasploit_module()
     try:
@@ -111,6 +142,7 @@ def _call_llm(system_prompt: str, user_prompt: str) -> str:
             ],
             temperature=0.3,
             max_tokens=4096,
+            **extra_kwargs,
         )
         return response.choices[0].message.content or ""
     except Exception:
