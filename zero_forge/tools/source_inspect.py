@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -294,12 +296,29 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
 
     try:
         proc = subprocess.run(
-            ["rg", "-n", "--no-heading", "-C", "2", pattern, str(base)],
+            ["rg", "--json", "-n", pattern, str(base)],
             capture_output=True, text=True, timeout=10,
         )
         if proc.returncode == 0:
-            for line in proc.stdout.splitlines()[:max_results]:
-                results.append({"match": line})
+            for raw_event in proc.stdout.splitlines():
+                try:
+                    event = json.loads(raw_event)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") != "match":
+                    continue
+                data = event.get("data", {})
+                path = data.get("path", {}).get("text", "")
+                line_number = data.get("line_number", 0)
+                line = data.get("lines", {}).get("text", "").rstrip("\r\n")
+                results.append({
+                    "path": path,
+                    "line_number": line_number,
+                    "line": line.strip(),
+                    "context": f"{line_number}: {line}",
+                })
+                if len(results) >= max_results:
+                    break
             return results
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
@@ -340,6 +359,25 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
     return results
 
 
+def _diff_destination_path(header: str) -> str | None:
+    """Extract the destination path from a ``diff --git`` header."""
+    payload = header.removeprefix("diff --git ")
+
+    if payload.endswith('"'):
+        try:
+            parts = shlex.split(payload)
+        except ValueError:
+            return None
+        if len(parts) >= 2:
+            return parts[-1].removeprefix("b/")
+
+    _, separator, destination = payload.rpartition(" b/")
+    if separator:
+        return destination
+
+    return None
+
+
 def git_diff_inspect(diff_text: str = "", repo_path: str = "") -> dict[str, Any]:
     """Inspect a git diff or patch."""
     result: dict[str, Any] = {
@@ -366,10 +404,10 @@ def git_diff_inspect(diff_text: str = "", repo_path: str = "") -> dict[str, Any]
     dele = 0
 
     for line in diff.splitlines():
-        if line.startswith("diff --git"):
-            parts = line.split()
-            if len(parts) >= 4:
-                files.append(parts[-1].lstrip("b/"))
+        if line.startswith("diff --git "):
+            destination = _diff_destination_path(line)
+            if destination is not None:
+                files.append(destination)
         elif line.startswith("+++") or line.startswith("---"):
             continue
         elif line.startswith("+") and not line.startswith("+++"):
