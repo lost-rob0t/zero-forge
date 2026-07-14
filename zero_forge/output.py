@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
+from .config import get_settings
 from .schemas import Artifact
-
-
-DEFAULT_OUTPUT_DIR = Path(os.environ.get("ZERO_FORGE_OUTPUT_DIR", "./output"))
 
 
 def save_artifact(artifact: Artifact, output_dir: Path | str | None = None) -> str:
@@ -20,7 +17,7 @@ def save_artifact(artifact: Artifact, output_dir: Path | str | None = None) -> s
     Returns the absolute path to the saved file.
     """
     if output_dir is None:
-        out_path = DEFAULT_OUTPUT_DIR
+        out_path = Path(get_settings().output.dir)
     else:
         out_path = Path(output_dir)
 

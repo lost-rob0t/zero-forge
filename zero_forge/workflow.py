@@ -99,11 +99,15 @@ def build_workflow() -> StateGraph:
 
 def run_workflow(vuln_input) -> WorkflowState:
     """Convenience: build and run the workflow with given input."""
+    from .config import get_settings
     from .schemas import VulnerabilityInput
     if isinstance(vuln_input, dict):
         vuln_input = VulnerabilityInput(**vuln_input)
     app = build_workflow()
-    initial_state = WorkflowState(vuln_input=vuln_input)
+    initial_state = WorkflowState(
+        vuln_input=vuln_input,
+        max_repair_attempts=get_settings().workflow.max_repair_attempts,
+    )
     result = app.invoke(initial_state)
     if isinstance(result, dict):
         result = WorkflowState(**result)

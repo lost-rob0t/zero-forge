@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
+from ..config import get_settings
 from ..schemas import (
     Artifact,
     ArtifactType,
@@ -101,10 +101,11 @@ def _resolve_provider() -> tuple[str | None, str, dict[str, str]]:
 
     Provider priority: OPENROUTER > OPENAI > ANTHROPIC > stub.
     """
-    or_key = os.environ.get("OPENROUTER_API_KEY")
-    openai_key = os.environ.get("OPENAI_API_KEY")
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-    model = os.environ.get("ZERO_FORGE_MODEL", "gpt-4o-mini")
+    cfg = get_settings()
+    or_key = cfg.openrouter_api_key
+    openai_key = cfg.openai_api_key
+    anthropic_key = cfg.anthropic_api_key
+    model = cfg.llm.model
     extra_kwargs: dict[str, str] = {}
 
     if or_key:
@@ -112,9 +113,8 @@ def _resolve_provider() -> tuple[str | None, str, dict[str, str]]:
         if not model.startswith("openrouter/"):
             model = f"openrouter/{model}"
         # Optional custom base URL (e.g. self-hosted OpenRouter-compatible endpoint)
-        base_url = os.environ.get("OPENROUTER_BASE_URL")
-        if base_url:
-            extra_kwargs["api_base"] = base_url
+        if cfg.llm.openrouter_base_url:
+            extra_kwargs["api_base"] = cfg.llm.openrouter_base_url
         return or_key, model, extra_kwargs
 
     if openai_key:
@@ -134,14 +134,15 @@ def _call_llm(system_prompt: str, user_prompt: str) -> str:
         return _stub_metasploit_module()
     try:
         import litellm
+        cfg = get_settings()
         response = litellm.completion(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.3,
-            max_tokens=4096,
+            temperature=cfg.llm.temperature,
+            max_tokens=cfg.llm.max_tokens,
             **extra_kwargs,
         )
         return response.choices[0].message.content or ""
@@ -210,7 +211,7 @@ def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext)
         artifact_type=ArtifactType.METASPLOIT,
         content=code,
         filename=f"{context.cve_id.lower().replace('-', '_')}_exploit.rb",
-        metadata={"model": os.environ.get("ZERO_FORGE_MODEL", "stub"), "cve_id": context.cve_id},
+        metadata={"model": get_settings().llm.model, "cve_id": context.cve_id},
     )
 
 

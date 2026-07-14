@@ -8,6 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from .config import get_settings
 from .schemas import VulnerabilityInput
 from .workflow import run_workflow
 
@@ -22,9 +23,18 @@ def generate(
     writeup_file: str = typer.Option("", "--writeup", "-w", help="Path to vulnerability write-up"),
     source_path: str = typer.Option("", "--source", "-s", help="Path to vulnerable source code"),
     patch_file: str = typer.Option("", "--patch", "-d", help="Path to patch/diff file"),
-    output_dir: str = typer.Option("./output", "--output", "-o", help="Output directory"),
+    output_dir: str = typer.Option("", "--output", "-o", help="Output directory (overrides config)"),
+    config_file: str = typer.Option("", "--config", help="Path to YAML config file"),
 ) -> None:
     """Generate a security artifact from vulnerability context."""
+    # Load config if --config specified, refreshing the singleton
+    if config_file:
+        import os
+        os.environ["ZERO_FORGE_CONFIG_PATH"] = config_file
+        get_settings(reload=True)
+
+    settings = get_settings()
+
     console.print(f"[bold]ZeroForge[/] — generating artifact for {cve_id}")
 
     poc_text = Path(poc_file).read_text(encoding="utf-8", errors="replace") if poc_file else ""
@@ -39,9 +49,11 @@ def generate(
         patch_diff=patch_diff,
     )
 
-    import os
+    # CLI --output overrides config; set it via env so config picks it up
     if output_dir:
+        import os
         os.environ["ZERO_FORGE_OUTPUT_DIR"] = output_dir
+        get_settings(reload=True)
 
     result = run_workflow(vuln_input)
 

@@ -30,6 +30,7 @@ input CVE + context
 
 ```
 zero_forge/
+├── config.py           # Centralized YAML + env var configuration
 ├── schemas.py          # Pydantic input/state/artifact schemas
 ├── workflow.py         # LangGraph workflow with repair loop
 ├── output.py           # Filesystem output
@@ -56,11 +57,63 @@ python -m zero_forge.cli generate --cve CVE-2021-44228
 # With source code and PoC
 python -m zero_forge.cli generate --cve CVE-2021-44228 --source /path/to/code --poc poc.txt
 
+# With a custom config file
+python -m zero_forge.cli generate --cve CVE-2021-44228 --config my_config.yaml
+
 # List available tools
 python -m zero_forge.cli tools
 
 # Validate an existing module
 python -m zero_forge.cli validate exploit.rb
+```
+
+## Configuration
+
+ZeroForge supports centralized configuration via YAML files and environment variables.
+
+### Config File
+
+Copy the example and edit as needed:
+
+```bash
+cp config.example.yaml zeroforge.yaml
+```
+
+Config search order (first match wins):
+1. `--config <path>` CLI flag (sets `ZERO_FORGE_CONFIG_PATH`)
+2. `ZERO_FORGE_CONFIG_PATH` env var
+3. `./zeroforge.yaml`
+4. `./zeroforge.yml`
+5. `~/.config/zeroforge/config.yaml`
+6. Built-in defaults
+
+### Environment Variables
+
+All settings can be overridden via environment variables (take priority over YAML):
+
+| Variable | Setting | Default |
+|---|---|---|
+| `ZERO_FORGE_MODEL` | `llm.model` | `gpt-4o-mini` |
+| `ZERO_FORGE_LLM_TEMPERATURE` | `llm.temperature` | `0.3` |
+| `ZERO_FORGE_LLM_MAX_TOKENS` | `llm.max_tokens` | `4096` |
+| `ZERO_FORGE_OPENROUTER_BASE_URL` | `llm.openrouter_base_url` | `""` |
+| `ZERO_FORGE_OUTPUT_DIR` | `output.dir` | `./output` |
+| `ZERO_FORGE_MAX_REPAIR_ATTEMPTS` | `workflow.max_repair_attempts` | `3` |
+| `OPENROUTER_API_KEY` | `openrouter_api_key` | `""` |
+| `OPENAI_API_KEY` | `openai_api_key` | `""` |
+| `ANTHROPIC_API_KEY` | `anthropic_api_key` | `""` |
+
+> **Security:** API keys are read exclusively from environment variables and are never loaded from YAML files.
+
+### Programmatic Access
+
+```python
+from zero_forge.config import get_settings
+
+settings = get_settings()
+print(settings.llm.model)             # gpt-4o-mini
+print(settings.output.dir)           # ./output
+print(settings.workflow.max_repair_attempts)  # 3
 ```
 
 ## LLM Mode

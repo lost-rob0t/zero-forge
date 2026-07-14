@@ -1,0 +1,18 @@
+# ZeroForge configuration example
+# Copy to zeroforge.yaml and edit as needed.
+# API keys are NOT stored here — set them as environment variables:
+#   export OPENROUTER_API_KEY="sk-..."
+#   export OPENAI_API_KEY="sk-..."
+#   export ANTHROPIC_API_KEY="sk-..."
+
+llm:
+  model: "gpt-4o-mini"          # LiteLLM model identifier
+  temperature: 0.3               # 0.0–2.0
+  max_tokens: 4096
+  openrouter_base_url: ""       # custom OpenRouter-compatible base URL
+
+workflow:
+  max_repair_attempts: 3        # validation→repair loop ceiling
+
+output:
+  dir: "./output"               # artifact output directory
