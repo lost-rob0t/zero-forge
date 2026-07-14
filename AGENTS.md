@@ -86,7 +86,6 @@ Ask before:
 
 - Modifying `pyproject.toml` or adding dependencies.
 - Editing `.github/workflows/`.
-- Creating commits or pushing branches.
 - Deleting files outside of `output/` or temp directories.
 
 ## Child DOX Index
