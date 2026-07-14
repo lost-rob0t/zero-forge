@@ -1,4 +1,4 @@
-"""Source code and Git inspection tools."""
+"""Source code, documentation, and Git inspection tools."""
 
 from __future__ import annotations
 
@@ -9,24 +9,74 @@ from pathlib import Path
 from typing import Any
 
 
+# --- File classification ------------------------------------------------
+
+_DOC_EXTS = {".md", ".txt", ".rst", ".adoc", ".org"}
+_CONFIG_EXTS = {
+    ".json", ".yaml", ".yml", ".ini", ".conf", ".properties",
+    ".env", ".cfg", ".toml", ".xml", ".config",
+}
+_DATA_EXTS = {".csv", ".tsv", ".sql", ".sqlite"}
+_SKIP_EXTS = {
+    ".pyc", ".pyo", ".class", ".jar", ".war", ".zip", ".gz",
+    ".tar", ".bz2", ".7z", ".rar", ".png", ".jpg", ".jpeg",
+    ".gif", ".bmp", ".ico", ".pdf", ".exe", ".dll", ".so",
+    ".dylib", ".bin", ".dat", ".db",
+}
+_DOC_FILENAMES = {
+    "readme", "changelog", "changes", "authors", "license",
+    "copying", "install", "hacking", "todo",
+}
+_CATEGORY_PRIORITY = {"documentation": 0, "config": 1, "data": 2, "code": 3}
+
+
 def _detect_language(filepath: str) -> str:
     ext_map = {
         ".py": "python", ".rb": "ruby", ".js": "javascript", ".ts": "typescript",
         ".java": "java", ".c": "c", ".cpp": "cpp", ".h": "c",
         ".go": "go", ".rs": "rust", ".php": "php", ".sh": "bash",
-        ".pl": "perl", ".xml": "xml", ".html": "html", ".yml": "yaml", ".yaml": "yaml",
+        ".pl": "perl", ".xml": "xml", ".html": "html",
+        ".yml": "yaml", ".yaml": "yaml",
+        ".md": "markdown", ".txt": "text", ".rst": "rst",
+        ".json": "json", ".ini": "ini", ".conf": "conf",
+        ".properties": "properties", ".toml": "toml",
+        ".cfg": "ini", ".env": "env", ".csv": "csv",
+        ".cfm": "cfml", ".cfc": "cfml",
+        ".asp": "asp", ".aspx": "asp", ".jsp": "jsp",
     }
     _, ext = os.path.splitext(filepath)
     return ext_map.get(ext.lower(), "unknown")
 
 
+def _categorize_file(filepath: str) -> str:
+    """Classify a file as documentation, config, data, or code."""
+    ext = os.path.splitext(filepath)[1].lower()
+    stem = os.path.splitext(os.path.basename(filepath))[0].lower()
+    if ext in _DOC_EXTS or stem in _DOC_FILENAMES:
+        return "documentation"
+    if ext in _CONFIG_EXTS:
+        return "config"
+    if ext in _DATA_EXTS:
+        return "data"
+    return "code"
+
+
+def _should_skip(filepath: str) -> bool:
+    """Check if a file should be skipped (binary/archive/image)."""
+    ext = os.path.splitext(filepath)[1].lower()
+    return ext in _SKIP_EXTS
+
+
 def read_source_files(source_path: str, max_files: int = 20, max_file_size: int = 51200) -> list[dict[str, Any]]:
-    """Read source files from a directory or single file."""
+    """Read files from a directory or single file.
+
+    Files are categorized (documentation/config/data/code) and sorted with
+    documentation first so the LLM receives vulnerability context (README,
+    write-ups, advisories) before source code.
+    """
     base = Path(source_path)
     if not base.exists():
         return []
-
-    results: list[dict[str, Any]] = []
 
     if base.is_file():
         files = [base]
@@ -36,9 +86,12 @@ def read_source_files(source_path: str, max_files: int = 20, max_file_size: int 
             dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", ".venv", "venv", "build", "dist"}]
             for fname in sorted(filenames):
                 files.append(Path(root) / fname)
-        files = sorted(files)
 
-    for fpath in files[:max_files]:
+    results: list[dict[str, Any]] = []
+
+    for fpath in files:
+        if _should_skip(str(fpath)):
+            continue
         try:
             size = fpath.stat().st_size
             if size > max_file_size:
@@ -46,11 +99,19 @@ def read_source_files(source_path: str, max_files: int = 20, max_file_size: int 
             raw = fpath.read_text(encoding="utf-8", errors="replace")
             if "\x00" in raw:
                 continue
-            results.append({"path": str(fpath), "content": raw, "language": _detect_language(str(fpath))})
+            category = _categorize_file(str(fpath))
+            results.append({
+                "path": str(fpath),
+                "content": raw,
+                "language": _detect_language(str(fpath)),
+                "category": category,
+                "filename": fpath.name,
+            })
         except OSError:
             continue
 
-    return results
+    results.sort(key=lambda r: (_CATEGORY_PRIORITY.get(r["category"], 99), r["path"]))
+    return results[:max_files]
 
 
 def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[dict[str, Any]]:
@@ -61,9 +122,11 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
 
     results: list[dict[str, Any]] = []
 
-    # Try ripgrep first
     try:
-        proc = subprocess.run(["rg", "-n", "--no-heading", "-C", "2", pattern, str(base)], capture_output=True, text=True, timeout=10)
+        proc = subprocess.run(
+            ["rg", "-n", "--no-heading", "-C", "2", pattern, str(base)],
+            capture_output=True, text=True, timeout=10,
+        )
         if proc.returncode == 0:
             for line in proc.stdout.splitlines()[:max_results]:
                 results.append({"match": line})
@@ -71,7 +134,6 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
 
-    # Fallback: Python line scanner
     try:
         regex = re.compile(re.escape(pattern))
     except re.error:

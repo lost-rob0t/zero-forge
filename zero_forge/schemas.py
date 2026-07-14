@@ -33,6 +33,8 @@ class SourceFile(BaseModel):
     path: str
     content: str
     language: str = "unknown"
+    category: str = "code"
+    filename: str = ""
 
 
 class CollectedContext(BaseModel):

@@ -19,6 +19,13 @@ You are a security research expert specializing in exploit development.
 You analyze vulnerabilities and generate security artifacts for authorized testing.
 You write clean, functional Metasploit exploit modules following Metasploit Framework conventions.
 
+CRITICAL: You MUST identify the specific target software, vendor, and vulnerability type from the provided context.
+- Name the actual software (e.g., "Adobe ColdFusion", "Apache Log4j", "WordPress Plugin X")
+- Reference the actual CVE ID provided in the context
+- Describe the actual vulnerability type (e.g., path traversal, RCE, SQL injection, SSRF)
+- Target the actual endpoints, parameters, and file paths mentioned in the PoC or write-up
+- Never generate a generic module — always be specific to the target software
+
 When writing a Metasploit module:
 - Use the class-based module format (class MetasploitModule < Msf::Exploit)
 - Include all required metadata: Name, Description, Author, References, License
@@ -50,10 +57,12 @@ def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> st
     if ctx.patch_diff:
         parts.append(f"### Patch / Diff\n```diff\n{ctx.patch_diff[:4000]}\n```")
     if ctx.source_files:
-        parts.append("### Relevant Source Code")
-        for sf in ctx.source_files[:5]:
-            parts.append(f"**File: {sf.path}** (language: {sf.language})")
-            parts.append(f"```\n{sf.content[:3000]}\n```")
+        parts.append("### Relevant Files from Source")
+        for sf in ctx.source_files[:8]:
+            budget = 6000 if sf.category == "documentation" else 4000
+            label = sf.category.upper() if sf.category != "code" else "CODE"
+            parts.append(f"**[{label}] File: {sf.filename}** (language: {sf.language})")
+            parts.append(f"```\n{sf.content[:budget]}\n```")
     if ctx.extra_notes:
         parts.append(f"### Notes\n{ctx.extra_notes}")
     parts.append("""
