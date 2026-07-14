@@ -181,7 +181,17 @@ def read_source_files(
     When *unsafe* is True, all safety checks are bypassed and every
     eligible file is read (legacy behaviour).
     """
-    base = Path(source_path).resolve()
+    raw_source = Path(source_path)
+    if not unsafe and raw_source.is_symlink():
+        return [
+            {
+                "path": str(raw_source),
+                "filename": raw_source.name,
+                "skipped": True,
+                "reason": "symlink: source_path is a symlink, not following",
+            }
+        ]
+    base = raw_source.resolve()
     if not base.exists():
         return []
 
@@ -314,27 +324,46 @@ def search_code(
         # Unsafe: search everything (legacy behaviour).
         if base.is_file():
             search_files: list[str] = [str(base)]
+            rg_targets: list[str] = [str(base)]
         else:
             search_files = []
             for root, dirs, filenames in os.walk(base):
                 dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
                 for fname in sorted(filenames):
                     search_files.append(str(Path(root) / fname))
+            # Pass the directory itself to rg to avoid ARG_MAX overflow on large trees.
+            rg_targets = [str(base)]
     elif allowed_paths is not None:
-        # Safe with explicit allowlist from read_source_files().
-        search_files = list(allowed_paths)
+        # Safe with explicit allowlist: intersect with internally-generated
+        # admitted set so the caller's list is never treated as authorization.
+        admitted_raw = read_source_files(source_path, unsafe=False)
+        admitted_set = {
+            r["path"] for r in admitted_raw if not r.get("skipped")
+        }
+        search_files = [p for p in allowed_paths if p in admitted_set]
+        rg_targets = search_files
     else:
         # Safe without allowlist: apply policy via read_source_files().
         admitted = read_source_files(source_path, unsafe=False)
         search_files = [r["path"] for r in admitted if not r.get("skipped")]
+        rg_targets = search_files
 
     if not search_files:
         return []
 
     # --- Ripgrep path -------------------------------------------------------
+    rg_cmd = ["rg", "--json", "-n"]
+    # When searching a directory directly (unsafe mode), add glob exclusions
+    # for _SKIP_DIRS to match the old pruned-walk behaviour and avoid ARG_MAX.
+    if unsafe and base.is_dir():
+        rg_cmd.append("--no-ignore")
+        for skip_dir in sorted(_SKIP_DIRS):
+            rg_cmd.extend(["-g", f"!{skip_dir}", "-g", f"!{skip_dir}/**"])
+    rg_cmd.append(pattern)
+    rg_cmd.extend(rg_targets)
     try:
         proc = subprocess.run(
-            ["rg", "--json", "-n", pattern, *search_files],
+            rg_cmd,
             capture_output=True, text=True, timeout=10,
         )
         if proc.returncode == 0:
@@ -358,7 +387,7 @@ def search_code(
                 if len(results) >= max_results:
                     break
             return results
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         pass
 
     # --- Python fallback ----------------------------------------------------

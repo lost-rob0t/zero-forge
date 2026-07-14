@@ -559,3 +559,149 @@ def test_search_code_empty_allowed_returns_empty():
         (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
         results = search_code(tmpdir, "2021-44228", allowed_paths=[])
         assert results == []
+
+
+# --- Security tests (PR #33 blockers) -----------------------------------
+
+
+def test_search_code_allowed_paths_rejects_credential_file():
+    """allowed_paths must not authorize credential files — intersect with admitted set."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
+        (Path(tmpdir) / "credentials.json").write_text(
+            '{"note":"2021-44228","token":"SECRET"}\n'
+        )
+
+        cred_path = str(Path(tmpdir) / "credentials.json")
+        results = search_code(tmpdir, "2021-44228", allowed_paths=[cred_path])
+        assert results == []
+
+
+def test_search_code_allowed_paths_rejects_credential_file_fallback(monkeypatch):
+    """allowed_paths must not authorize credential files in the Python fallback either."""
+    import zero_forge.tools.source_inspect as si
+
+    def _fake_run(*args, **kwargs):
+        raise FileNotFoundError("rg not available")
+
+    monkeypatch.setattr(si.subprocess, "run", _fake_run)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
+        (Path(tmpdir) / "credentials.json").write_text(
+            '{"note":"2021-44228","token":"SECRET"}\n'
+        )
+
+        cred_path = str(Path(tmpdir) / "credentials.json")
+        results = search_code(tmpdir, "2021-44228", allowed_paths=[cred_path])
+        assert results == []
+
+
+def test_search_code_allowed_paths_rejects_symlink():
+    """allowed_paths must not authorize symlinked files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        outside = Path(tmpdir) / "_outside.txt"
+        outside.write_text("CVE-2021-44228 secret=leaked\n")
+
+        src = Path(tmpdir) / "src"
+        src.mkdir()
+        (src / "safe.py").write_text("# CVE-2021-44228\n")
+        link = src / "leak.txt"
+        os.symlink(outside, link)
+
+        link_path = str(link)
+        results = search_code(str(src), "2021-44228", allowed_paths=[link_path])
+        assert results == []
+
+
+def test_search_code_allowed_paths_rejects_symlink_fallback(monkeypatch):
+    """allowed_paths must not authorize symlinked files in the Python fallback either."""
+    import zero_forge.tools.source_inspect as si
+
+    def _fake_run(*args, **kwargs):
+        raise FileNotFoundError("rg not available")
+
+    monkeypatch.setattr(si.subprocess, "run", _fake_run)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        outside = Path(tmpdir) / "_outside.txt"
+        outside.write_text("CVE-2021-44228 secret=leaked\n")
+
+        src = Path(tmpdir) / "src"
+        src.mkdir()
+        (src / "safe.py").write_text("# CVE-2021-44228\n")
+        link = src / "leak.txt"
+        os.symlink(outside, link)
+
+        link_path = str(link)
+        results = search_code(str(src), "2021-44228", allowed_paths=[link_path])
+        assert results == []
+
+
+def test_search_code_allowed_paths_rejects_out_of_root():
+    """allowed_paths must not authorize files outside the source root."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        outside = Path(tmpdir) / "outside.py"
+        outside.write_text("# CVE-2021-44228\n")
+
+        src = Path(tmpdir) / "src"
+        src.mkdir()
+        (src / "safe.py").write_text("# CVE-2021-44228\n")
+
+        outside_path = str(outside)
+        results = search_code(str(src), "2021-44228", allowed_paths=[outside_path])
+        assert results == []
+
+
+def test_read_source_files_symlink_source_path():
+    """A source_path that is itself a symlink must be skipped, not followed."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        target_dir = Path(tmpdir) / "real_src"
+        target_dir.mkdir()
+        (target_dir / "app.py").write_text("x = 1\n")
+
+        link_to_dir = Path(tmpdir) / "link_src"
+        os.symlink(target_dir, link_to_dir)
+
+        results = read_source_files(str(link_to_dir))
+        skipped = [r for r in results if r.get("skipped")]
+        readable = [r for r in results if not r.get("skipped")]
+
+        assert len(readable) == 0
+        assert len(skipped) == 1
+        assert "symlink" in skipped[0]["reason"]
+
+        for r in results:
+            assert "x = 1" not in r.get("content", "")
+
+
+def test_read_source_files_symlink_source_path_unsafe():
+    """In unsafe mode, a symlinked source_path should be followed."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        target_dir = Path(tmpdir) / "real_src"
+        target_dir.mkdir()
+        (target_dir / "app.py").write_text("x = 1\n")
+
+        link_to_dir = Path(tmpdir) / "link_src"
+        os.symlink(target_dir, link_to_dir)
+
+        results = read_source_files(str(link_to_dir), unsafe=True)
+        readable = [r for r in results if not r.get("skipped")]
+        assert len(readable) == 1
+        assert readable[0]["filename"] == "app.py"
+
+
+def test_search_code_unsafe_oserror_caught(monkeypatch):
+    """OSError from rg (e.g. ARG_MAX exceeded) must be caught, not crash."""
+    import zero_forge.tools.source_inspect as si
+
+    def _fake_run(*args, **kwargs):
+        raise OSError("Argument list too long")
+
+    monkeypatch.setattr(si.subprocess, "run", _fake_run)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
+        results = search_code(tmpdir, "2021-44228", unsafe=True)
+        assert len(results) == 1
+        assert "app.py" in results[0]["path"]
