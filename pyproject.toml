@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zero-forge"
+version = "0.1.0"
+description = "LLM-based exploit-development harness for security artifact generation"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=1.0",
+    "pydantic>=2.0",
+    "typer>=0.9",
+    "litellm>=1.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+zero-forge = "zero_forge.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
