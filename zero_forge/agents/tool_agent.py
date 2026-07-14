@@ -35,6 +35,8 @@ class ToolAgent:
             ctx.extra_notes = f"CVE lookup failed: {e}"
 
         # Read source files (categorized: documentation first, then config, data, code)
+        unsafe = False
+        admitted_paths: list[str] = []
         if vuln_input.source_path:
             try:
                 from ..config import get_settings
@@ -49,6 +51,7 @@ class ToolAgent:
                 skipped = [f for f in files if f.get("skipped")]
                 ctx.source_files = [SourceFile(**f) for f in readable]
                 ctx.skipped_files = skipped
+                admitted_paths = [sf.path for sf in ctx.source_files]
 
                 if skipped:
                     ctx.extra_notes += (
@@ -75,7 +78,7 @@ class ToolAgent:
             except Exception:
                 pass
 
-        # Search for patterns in source
+        # Search for patterns in source (safe mode restricts to admitted files)
         if vuln_input.source_path and vuln_input.cve_id:
             try:
                 pattern = vuln_input.cve_id.replace("CVE-", "")
@@ -83,6 +86,8 @@ class ToolAgent:
                     "search_code",
                     source_path=vuln_input.source_path,
                     pattern=pattern,
+                    unsafe=unsafe,
+                    allowed_paths=admitted_paths if not unsafe else None,
                 )
                 if search_results:
                     ctx.extra_notes += (

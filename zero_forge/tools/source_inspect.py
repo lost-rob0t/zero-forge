@@ -181,7 +181,17 @@ def read_source_files(
     When *unsafe* is True, all safety checks are bypassed and every
     eligible file is read (legacy behaviour).
     """
-    base = Path(source_path).resolve()
+    raw_source = Path(source_path)
+    if not unsafe and raw_source.is_symlink():
+        return [
+            {
+                "path": str(raw_source),
+                "filename": raw_source.name,
+                "skipped": True,
+                "reason": "symlink: source_path is a symlink, not following",
+            }
+        ]
+    base = raw_source.resolve()
     if not base.exists():
         return []
 
@@ -286,17 +296,74 @@ def read_source_files(
     return non_skipped[:max_files] + skipped
 
 
-def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[dict[str, Any]]:
-    """Search source code for a pattern (string or regex)."""
+def search_code(
+    source_path: str,
+    pattern: str,
+    max_results: int = 10,
+    unsafe: bool = False,
+    allowed_paths: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Search source code for a pattern (string or regex).
+
+    When *unsafe* is False (default), only files admitted by the
+    source-collection policy are searched.  When *allowed_paths* is
+    provided, only those explicit paths are searched; otherwise the
+    same policy as ``read_source_files()`` is applied internally.
+
+    When *unsafe* is True, all safety checks are bypassed and every
+    file under *source_path* is searched (legacy behaviour).
+    """
     base = Path(source_path)
     if not base.exists() or not pattern:
         return []
 
     results: list[dict[str, Any]] = []
 
+    # --- Determine the set of files to search -------------------------------
+    if unsafe:
+        # Unsafe: search everything (legacy behaviour).
+        if base.is_file():
+            search_files: list[str] = [str(base)]
+            rg_targets: list[str] = [str(base)]
+        else:
+            search_files = []
+            for root, dirs, filenames in os.walk(base):
+                dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+                for fname in sorted(filenames):
+                    search_files.append(str(Path(root) / fname))
+            # Pass the directory itself to rg to avoid ARG_MAX overflow on large trees.
+            rg_targets = [str(base)]
+    elif allowed_paths is not None:
+        # Safe with explicit allowlist: intersect with internally-generated
+        # admitted set so the caller's list is never treated as authorization.
+        admitted_raw = read_source_files(source_path, unsafe=False)
+        admitted_set = {
+            r["path"] for r in admitted_raw if not r.get("skipped")
+        }
+        search_files = [p for p in allowed_paths if p in admitted_set]
+        rg_targets = search_files
+    else:
+        # Safe without allowlist: apply policy via read_source_files().
+        admitted = read_source_files(source_path, unsafe=False)
+        search_files = [r["path"] for r in admitted if not r.get("skipped")]
+        rg_targets = search_files
+
+    if not search_files:
+        return []
+
+    # --- Ripgrep path -------------------------------------------------------
+    rg_cmd = ["rg", "--json", "-n"]
+    # When searching a directory directly (unsafe mode), add glob exclusions
+    # for _SKIP_DIRS to match the old pruned-walk behaviour and avoid ARG_MAX.
+    if unsafe and base.is_dir():
+        rg_cmd.extend(["--no-ignore", "--hidden", "--follow"])
+        for skip_dir in sorted(_SKIP_DIRS):
+            rg_cmd.extend(["-g", f"!{skip_dir}", "-g", f"!{skip_dir}/**"])
+    rg_cmd.append(pattern)
+    rg_cmd.extend(rg_targets)
     try:
         proc = subprocess.run(
-            ["rg", "--json", "-n", pattern, str(base)],
+            rg_cmd,
             capture_output=True, text=True, timeout=10,
         )
         if proc.returncode == 0:
@@ -320,24 +387,17 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
                 if len(results) >= max_results:
                     break
             return results
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         pass
 
+    # --- Python fallback ----------------------------------------------------
     try:
         regex = re.compile(re.escape(pattern))
     except re.error:
         return results
 
-    if base.is_file():
-        files: list[Path] = [base]
-    else:
-        files = []
-        for root, dirs, filenames in os.walk(base):
-            dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
-            for fname in sorted(filenames):
-                files.append(Path(root) / fname)
-
-    for fpath in sorted(files):
+    for fpath_str in sorted(search_files):
+        fpath = Path(fpath_str)
         if len(results) >= max_results:
             break
         try:
@@ -348,7 +408,10 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
             if regex.search(line):
                 start = max(0, i - 1)
                 end = min(len(lines), i + 2)
-                context = "\n".join(f"{start+j+1}: {lines[start+j]}" for j in range(end - start))
+                context = "\n".join(
+                    f"{start + j + 1}: {lines[start + j]}"
+                    for j in range(end - start)
+                )
                 results.append({
                     "path": str(fpath), "line_number": i + 1,
                     "line": line.strip(), "context": context,
