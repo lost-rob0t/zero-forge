@@ -30,6 +30,10 @@ def generate(
     output_dir: str = typer.Option("", "--output", "-o",
                               help="Output directory (overrides config)"),
     config_file: str = typer.Option("", "--config", help="Path to YAML config file"),
+    unsafe: bool = typer.Option(
+        False, "--unsafe",
+        help="Allow reading secrets and following symlinks during source collection",
+    ),
 ) -> None:
     """Generate a security artifact from vulnerability context."""
     # Load config if --config specified, refreshing the singleton
@@ -56,6 +60,12 @@ def generate(
         source_path=source_path or None,
         patch_diff=patch_diff,
     )
+
+    # CLI --unsafe enables unsafe source collection via env var
+    if unsafe:
+        import os
+        os.environ["ZERO_FORGE_UNSAFE_SOURCE"] = "true"
+        get_settings(reload=True)
 
     # CLI --output overrides config; set it via env so config picks it up
     if output_dir:

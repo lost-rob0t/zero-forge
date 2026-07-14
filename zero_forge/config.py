@@ -40,6 +40,10 @@ class WorkflowConfig(BaseModel):
     """Workflow execution settings."""
 
     max_repair_attempts: int = Field(default=3, ge=0, le=20)
+    unsafe_source_collection: bool = Field(
+        default=False,
+        description="Allow reading secret files and following symlinks during source collection",
+    )
 
 
 class OutputConfig(BaseModel):
@@ -77,6 +81,7 @@ _ENV_MAP: dict[str, tuple[str]] = {
     "OPENROUTER_BASE_URL": ("llm.openrouter_base_url",),
     "ZERO_FORGE_OUTPUT_DIR": ("output.dir",),
     "ZERO_FORGE_MAX_REPAIR_ATTEMPTS": ("workflow.max_repair_attempts",),
+    "ZERO_FORGE_UNSAFE_SOURCE": ("workflow.unsafe_source_collection",),
     "OPENROUTER_API_KEY": ("openrouter_api_key",),
     "OPENAI_API_KEY": ("openai_api_key",),
     "ANTHROPIC_API_KEY": ("anthropic_api_key",),

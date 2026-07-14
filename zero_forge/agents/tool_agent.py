@@ -37,8 +37,24 @@ class ToolAgent:
         # Read source files (categorized: documentation first, then config, data, code)
         if vuln_input.source_path:
             try:
-                files = self.registry.call("read_source_files", source_path=vuln_input.source_path)
-                ctx.source_files = [SourceFile(**f) for f in files]
+                from ..config import get_settings
+                unsafe = get_settings().workflow.unsafe_source_collection
+                files = self.registry.call(
+                    "read_source_files",
+                    source_path=vuln_input.source_path,
+                    unsafe=unsafe,
+                )
+                # Separate skipped entries (no content) from readable source files.
+                readable = [f for f in files if not f.get("skipped")]
+                skipped = [f for f in files if f.get("skipped")]
+                ctx.source_files = [SourceFile(**f) for f in readable]
+                ctx.skipped_files = skipped
+
+                if skipped:
+                    ctx.extra_notes += (
+                        f"\nSource collection skipped {len(skipped)} file(s) "
+                        f"(secrets, symlinks, or gitignored)."
+                    )
 
                 # Auto-extract documentation into writeup_text if none was provided
                 if not vuln_input.writeup_text:

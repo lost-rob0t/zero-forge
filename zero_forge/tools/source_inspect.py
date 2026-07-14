@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -29,6 +30,94 @@ _DOC_FILENAMES = {
 }
 _CATEGORY_PRIORITY = {"documentation": 0, "config": 1, "data": 2, "code": 3}
 
+# --- Secret / sensitive file detection ----------------------------------
+
+# Filenames that are always secrets or credentials when matched
+# case-insensitively against the basename (with optional extension).
+_SECRET_FILENAMES: set[str] = {
+    ".env", ".env.local", ".env.production", ".env.staging", ".env.development",
+    ".env.test", ".env.example",  # .env.example is a template, but skip to be safe
+    ".npmrc", ".pypirc", ".netrc", "credentials", "credentials.json",
+    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+    "identity", "secret.key", "private.key", "private_key",
+    "serviceaccount.json", "credentials.csv",
+}
+
+# Extensions associated with private keys and certificate secrets.
+_SECRET_EXTS: set[str] = {
+    ".pem", ".key", ".p12", ".pfx", ".keystore", ".jks",
+    ".ssh", ".gpg", ".asc",
+}
+
+# Regex patterns for filenames that look like secrets.
+_SECRET_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"^\.(env|npmrc|pypirc|netrc)", re.IGNORECASE),
+    re.compile(r"^id_(rsa|dsa|ecdsa|ed25519)", re.IGNORECASE),
+    re.compile(r"(^|[-_.])(private|secret|api[_-]?key|token|credential)([-_.]|$)", re.IGNORECASE),
+    re.compile(r"\.env($|\.)", re.IGNORECASE),
+    re.compile(r"\.htpasswd$", re.IGNORECASE),
+    re.compile(r"^shadow$", re.IGNORECASE),
+    re.compile(r"^\.(gitconfig|git-credentials)$", re.IGNORECASE),
+]
+
+
+def _is_secret_file(filepath: str) -> bool:
+    """Return True if the file looks like a secret or credential file."""
+    basename = os.path.basename(filepath)
+    stem = os.path.splitext(basename)[0].lower()
+    ext = os.path.splitext(filepath)[1].lower()
+
+    if basename.lower() in _SECRET_FILENAMES or stem in _SECRET_FILENAMES:
+        return True
+    if ext in _SECRET_EXTS:
+        return True
+    for pat in _SECRET_PATTERNS:
+        if pat.search(basename):
+            return True
+    return False
+
+
+# --- VCS ignore support -------------------------------------------------
+
+_SKIP_DIRS = {
+    ".git", "node_modules", "__pycache__", ".venv", "venv",
+    "build", "dist", ".mypy_cache", ".ruff_cache", ".pytest_cache",
+    ".tox", ".eggs", ".cache",
+}
+
+
+def _load_gitignore(root: Path) -> list[re.Pattern[str]]:
+    """Load .gitignore patterns from *root* and compile them."""
+    gitignore = root / ".gitignore"
+    if not gitignore.is_file():
+        return []
+    patterns: list[re.Pattern[str]] = []
+    try:
+        text = gitignore.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Skip negation patterns (!...) — we don't support un-ignoring.
+        if line.startswith("!"):
+            continue
+        # Convert glob to regex (simple: * → .*, ? → .)
+        regex = re.escape(line).replace(r"\*", ".*").replace(r"\?", ".")
+        patterns.append(re.compile(regex, re.IGNORECASE))
+    return patterns
+
+
+def _is_gitignored(rel_path: str, patterns: list[re.Pattern[str]]) -> bool:
+    """Return True if *rel_path* matches any gitignore pattern."""
+    for pat in patterns:
+        if pat.search(rel_path):
+            return True
+    return False
+
+
+# --- Language detection -------------------------------------------------
 
 def _detect_language(filepath: str) -> str:
     ext_map = {
@@ -67,34 +156,109 @@ def _should_skip(filepath: str) -> bool:
     return ext in _SKIP_EXTS
 
 
+# --- Source file reading ------------------------------------------------
+
 def read_source_files(
-    source_path: str, max_files: int = 20, max_file_size: int = 51200
+    source_path: str,
+    max_files: int = 20,
+    max_file_size: int = 51200,
+    unsafe: bool = False,
 ) -> list[dict[str, Any]]:
     """Read files from a directory or single file.
 
     Files are categorized (documentation/config/data/code) and sorted with
     documentation first so the LLM receives vulnerability context (README,
     write-ups, advisories) before source code.
+
+    When *unsafe* is False (default), the function:
+      - Never follows symlinks.
+      - Excludes known secret/credential files and patterns.
+      - Respects .gitignore rules in the source root.
+      - Verifies every resolved file stays under the source root.
+      - Records skipped-file reasons (without secret content) as entries
+        with ``"skipped": True`` and ``"reason"`` keys.
+
+    When *unsafe* is True, all safety checks are bypassed and every
+    eligible file is read (legacy behaviour).
     """
-    base = Path(source_path)
+    base = Path(source_path).resolve()
     if not base.exists():
         return []
 
     if base.is_file():
-        files = [base]
+        files: list[Path] = [base]
     else:
         files = []
         for root, dirs, filenames in os.walk(base):
-            dirs[:] = [
-    d for d in dirs
-    if d not in {".git", "node_modules", "__pycache__", ".venv", "venv", "build", "dist"}
-]
+            dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
             for fname in sorted(filenames):
                 files.append(Path(root) / fname)
 
     results: list[dict[str, Any]] = []
 
+    # Pre-load gitignore patterns for safe mode.
+    gitignore_patterns: list[re.Pattern[str]] = []
+    if not unsafe and base.is_dir():
+        gitignore_patterns = _load_gitignore(base)
+
     for fpath in files:
+        # --- Safe-mode checks (skipped entirely in unsafe mode) ---
+        if not unsafe:
+            # 1. Never follow symlinks.
+            if fpath.is_symlink():
+                results.append({
+                    "path": str(fpath),
+                    "filename": fpath.name,
+                    "skipped": True,
+                    "reason": "symlink: not following file symlinks",
+                })
+                continue
+
+            # 2. Verify resolved path stays under source root.
+            try:
+                resolved = fpath.resolve()
+                if not str(resolved).startswith(str(base)):
+                    results.append({
+                        "path": str(fpath),
+                        "filename": fpath.name,
+                        "skipped": True,
+                        "reason": "path escape: file resolves outside source root",
+                    })
+                    continue
+            except OSError:
+                results.append({
+                    "path": str(fpath),
+                    "filename": fpath.name,
+                    "skipped": True,
+                    "reason": "resolve error: unable to resolve path",
+                })
+                continue
+
+            # 3. Exclude known secret/credential files.
+            if _is_secret_file(str(fpath)):
+                results.append({
+                    "path": str(fpath),
+                    "filename": fpath.name,
+                    "skipped": True,
+                    "reason": "secret file: credential or key material excluded",
+                })
+                continue
+
+            # 4. Respect .gitignore rules.
+            try:
+                rel = str(fpath.relative_to(base))
+            except ValueError:
+                rel = str(fpath)
+            if _is_gitignored(rel, gitignore_patterns):
+                results.append({
+                    "path": str(fpath),
+                    "filename": fpath.name,
+                    "skipped": True,
+                    "reason": "gitignored: file matches .gitignore pattern",
+                })
+                continue
+
+        # --- Common checks (both safe and unsafe modes) ---
         if _should_skip(str(fpath)):
             continue
         try:
@@ -115,8 +279,11 @@ def read_source_files(
         except OSError:
             continue
 
-    results.sort(key=lambda r: (_CATEGORY_PRIORITY.get(r["category"], 99), r["path"]))
-    return results[:max_files]
+    # Sort only non-skipped results; skipped entries go at the end.
+    non_skipped = [r for r in results if not r.get("skipped")]
+    skipped = [r for r in results if r.get("skipped")]
+    non_skipped.sort(key=lambda r: (_CATEGORY_PRIORITY.get(r["category"], 99), r["path"]))
+    return non_skipped[:max_files] + skipped
 
 
 def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[dict[str, Any]]:
@@ -129,12 +296,29 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
 
     try:
         proc = subprocess.run(
-            ["rg", "-n", "--no-heading", "-C", "2", pattern, str(base)],
+            ["rg", "--json", "-n", pattern, str(base)],
             capture_output=True, text=True, timeout=10,
         )
         if proc.returncode == 0:
-            for line in proc.stdout.splitlines()[:max_results]:
-                results.append({"match": line})
+            for raw_event in proc.stdout.splitlines():
+                try:
+                    event = json.loads(raw_event)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") != "match":
+                    continue
+                data = event.get("data", {})
+                path = data.get("path", {}).get("text", "")
+                line_number = data.get("line_number", 0)
+                line = data.get("lines", {}).get("text", "").rstrip("\r\n")
+                results.append({
+                    "path": path,
+                    "line_number": line_number,
+                    "line": line.strip(),
+                    "context": f"{line_number}: {line}",
+                })
+                if len(results) >= max_results:
+                    break
             return results
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
@@ -145,14 +329,11 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
         return results
 
     if base.is_file():
-        files = [base]
+        files: list[Path] = [base]
     else:
         files = []
         for root, dirs, filenames in os.walk(base):
-            dirs[:] = [
-    d for d in dirs
-    if d not in {".git", "node_modules", "__pycache__", ".venv", "venv"}
-]
+            dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
             for fname in sorted(filenames):
                 files.append(Path(root) / fname)
 
@@ -169,9 +350,9 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
                 end = min(len(lines), i + 2)
                 context = "\n".join(f"{start+j+1}: {lines[start+j]}" for j in range(end - start))
                 results.append({
-    "path": str(fpath), "line_number": i + 1,
-    "line": line.strip(), "context": context,
-})
+                    "path": str(fpath), "line_number": i + 1,
+                    "line": line.strip(), "context": context,
+                })
                 if len(results) >= max_results:
                     break
 
@@ -200,17 +381,17 @@ def _diff_destination_path(header: str) -> str | None:
 def git_diff_inspect(diff_text: str = "", repo_path: str = "") -> dict[str, Any]:
     """Inspect a git diff or patch."""
     result: dict[str, Any] = {
-    "files_changed": [], "additions": 0,
-    "deletions": 0, "diff_summary": "",
-}
+        "files_changed": [], "additions": 0,
+        "deletions": 0, "diff_summary": "",
+    }
 
     diff = diff_text
     if not diff and repo_path:
         try:
             proc = subprocess.run(
-    ["git", "diff", "HEAD"], cwd=repo_path,
-    capture_output=True, text=True, timeout=10,
-)
+                ["git", "diff", "HEAD"], cwd=repo_path,
+                capture_output=True, text=True, timeout=10,
+            )
             diff = proc.stdout
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             pass
