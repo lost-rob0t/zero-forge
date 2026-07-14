@@ -13,6 +13,9 @@ from .schemas import Artifact
 # CVE ID pattern: CVE-YYYY-NNNN+
 _CVE_ID_RE = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}$")
 
+# Reserved sidecar fields that must never be overwritten by free-form metadata
+_RESERVED_META_KEYS = frozenset({"artifact_type", "filename", "saved_at"})
+
 
 class ArtifactPathError(Exception):
     """Raised when an artifact path is invalid or escapes the output directory."""
@@ -127,11 +130,15 @@ def save_artifact(artifact: Artifact, output_dir: Path | str | None = None) -> s
     meta_name = filepath.name + ".meta.json"
     meta_path = _safe_resolve(out_path, meta_name)
 
+    # Filter reserved keys from user metadata to prevent sidecar spoofing
+    user_meta = {
+        k: v for k, v in artifact.metadata.items() if k not in _RESERVED_META_KEYS
+    }
     meta = {
         "artifact_type": artifact.artifact_type.value,
         "filename": filepath.name,
         "saved_at": datetime.now().isoformat(),
-        **artifact.metadata,
+        **user_meta,
     }
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 

@@ -162,6 +162,55 @@ def test_save_artifact_rejects_dot_filename(tmp_path):
         save_artifact(art, output_dir=tmp_path)
 
 
+def test_metadata_reserved_fields_not_overwritten(tmp_path):
+    """User metadata cannot overwrite reserved sidecar fields (issue #6)."""
+    art = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend\n",
+        filename="spoof_test.rb",
+        metadata={
+            "cve_id": "CVE-2021-44228",
+            "artifact_type": "spoof",
+            "filename": "spoof.rb",
+            "saved_at": "spoofed",
+        },
+    )
+    path = save_artifact(art, output_dir=tmp_path)
+
+    meta_path = Path(path).with_suffix(".rb.meta.json")
+    meta = json.loads(meta_path.read_text())
+
+    # Reserved fields must reflect actual saved artifact, not user metadata
+    assert meta["artifact_type"] == "metasploit"
+    assert meta["filename"] == "spoof_test.rb"
+    assert meta["saved_at"] != "spoofed"
+    # User-supplied cve_id is preserved
+    assert meta["cve_id"] == "CVE-2021-44228"
+
+
+def test_metadata_sidecar_matches_actual_artifact(tmp_path):
+    """Sidecar filename and type must match the actual saved file (issue #6)."""
+    art = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="payload\n",
+        filename="real_exploit.rb",
+        metadata={
+            "artifact_type": "fake",
+            "filename": "fake.rb",
+            "saved_at": "1970-01-01T00:00:00",
+        },
+    )
+    path = save_artifact(art, output_dir=tmp_path)
+    saved_path = Path(path)
+
+    meta_path = saved_path.with_suffix(".rb.meta.json")
+    meta = json.loads(meta_path.read_text())
+
+    assert meta["filename"] == saved_path.name
+    assert meta["artifact_type"] == art.artifact_type.value
+    assert meta["saved_at"] != "1970-01-01T00:00:00"
+
+
 def test_save_artifact_rejects_double_dot_filename(tmp_path):
     art = _make_artifact("..")
     with pytest.raises(ArtifactPathError, match="parent directory|basename"):
