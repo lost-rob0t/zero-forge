@@ -13,6 +13,7 @@ llm:
 
 workflow:
   max_repair_attempts: 3        # validation→repair loop ceiling
+  unsafe_source_collection: false  # allow reading secrets and following symlinks
 
 output:
   dir: "./output"               # artifact output directory

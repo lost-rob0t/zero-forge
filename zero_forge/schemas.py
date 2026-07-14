@@ -44,6 +44,7 @@ class CollectedContext(BaseModel):
     affected_versions: str = ""
     references: list[str] = Field(default_factory=list)
     source_files: list[SourceFile] = Field(default_factory=list)
+    skipped_files: list[dict[str, Any]] = Field(default_factory=list)
     patch_diff: str = ""
     poc_text: str = ""
     writeup_text: str = ""
