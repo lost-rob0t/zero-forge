@@ -178,7 +178,6 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
     return results
 
 
-
 def _diff_destination_path(header: str) -> str | None:
     """Extract the destination path from a ``diff --git`` header."""
     payload = header.removeprefix("diff --git ")
@@ -196,6 +195,7 @@ def _diff_destination_path(header: str) -> str | None:
         return destination
 
     return None
+
 
 def git_diff_inspect(diff_text: str = "", repo_path: str = "") -> dict[str, Any]:
     """Inspect a git diff or patch."""
