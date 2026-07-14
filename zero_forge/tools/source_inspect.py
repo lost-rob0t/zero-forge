@@ -356,7 +356,7 @@ def search_code(
     # When searching a directory directly (unsafe mode), add glob exclusions
     # for _SKIP_DIRS to match the old pruned-walk behaviour and avoid ARG_MAX.
     if unsafe and base.is_dir():
-        rg_cmd.append("--no-ignore")
+        rg_cmd.extend(["--no-ignore", "--hidden", "--follow"])
         for skip_dir in sorted(_SKIP_DIRS):
             rg_cmd.extend(["-g", f"!{skip_dir}", "-g", f"!{skip_dir}/**"])
     rg_cmd.append(pattern)

@@ -705,3 +705,134 @@ def test_search_code_unsafe_oserror_caught(monkeypatch):
         results = search_code(tmpdir, "2021-44228", unsafe=True)
         assert len(results) == 1
         assert "app.py" in results[0]["path"]
+
+
+# --- Backend parity tests (rg --hidden --follow mismatch) ---------------
+
+
+def test_search_code_unsafe_finds_env_file(monkeypatch):
+    """Unsafe Python fallback search must find matches in hidden .env files.
+
+    Without ``--hidden``, ripgrep skips dotfiles, but the Python fallback
+    iterates ``os.walk`` results which include them.  Both backends must
+    behave identically.
+    """
+    import zero_forge.tools.source_inspect as si
+
+    def _fake_run(*args, **kwargs):
+        raise FileNotFoundError("rg not available")
+
+    monkeypatch.setattr(si.subprocess, "run", _fake_run)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
+        (Path(tmpdir) / ".env").write_text("# 2021-44228\nAPI_KEY=secret\n")
+
+        results = search_code(tmpdir, "2021-44228", unsafe=True)
+        paths = {r["path"] for r in results}
+        assert any("app.py" in p for p in paths)
+        assert any(p.endswith(".env") for p in paths), (
+            "Python fallback must find .env — rg parity depends on --hidden"
+        )
+
+
+def test_search_code_unsafe_finds_env_file_rg(monkeypatch):
+    """Unsafe rg search must find matches in hidden .env files.
+
+    Verifies that the ripgrep backend uses ``--hidden`` so hidden files are
+    searched, matching the Python fallback behaviour.
+    """
+    import zero_forge.tools.source_inspect as si
+
+    captured_args: list[list[str]] = []
+    real_run = si.subprocess.run
+
+    def _capturing_run(args, **kwargs):
+        captured_args.append(args)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(si.subprocess, "run", _capturing_run)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
+        (Path(tmpdir) / ".env").write_text("# 2021-44228\nAPI_KEY=secret\n")
+
+        results = search_code(tmpdir, "2021-44228", unsafe=True)
+        paths = {r["path"] for r in results}
+        assert any("app.py" in p for p in paths)
+        assert any(p.endswith(".env") for p in paths), (
+            "rg backend must find .env — requires --hidden flag"
+        )
+        assert any("--hidden" in arg for arg in captured_args), (
+            "rg command must include --hidden in unsafe directory mode"
+        )
+
+
+def test_search_code_unsafe_finds_symlink_file(monkeypatch):
+    """Unsafe Python fallback search must find matches in symlinked files.
+
+    Without ``--follow``, ripgrep skips symlinks, but the Python fallback
+    iterates ``os.walk`` results which include them.  Both backends must
+    behave identically.
+    """
+    import zero_forge.tools.source_inspect as si
+
+    def _fake_run(*args, **kwargs):
+        raise FileNotFoundError("rg not available")
+
+    monkeypatch.setattr(si.subprocess, "run", _fake_run)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        outside = Path(tmpdir) / "_outside.txt"
+        outside.write_text("CVE-2021-44228 secret=leaked\n")
+
+        src = Path(tmpdir) / "src"
+        src.mkdir()
+        (src / "safe.py").write_text("# CVE-2021-44228\n")
+        link = src / "leak.txt"
+        os.symlink(outside, link)
+
+        results = search_code(str(src), "2021-44228", unsafe=True)
+        paths = {r["path"] for r in results}
+        assert any("safe.py" in p for p in paths)
+        assert any("leak.txt" in p for p in paths), (
+            "Python fallback must find symlinked file — rg parity depends on --follow"
+        )
+
+
+def test_search_code_unsafe_finds_symlink_file_rg(monkeypatch):
+    """Unsafe rg search must find matches in symlinked files.
+
+    Verifies that the ripgrep backend uses ``--follow`` so symlinks are
+    traversed, matching the Python fallback behaviour.
+    """
+    import zero_forge.tools.source_inspect as si
+
+    captured_args: list[list[str]] = []
+    real_run = si.subprocess.run
+
+    def _capturing_run(args, **kwargs):
+        captured_args.append(args)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(si.subprocess, "run", _capturing_run)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        outside = Path(tmpdir) / "_outside.txt"
+        outside.write_text("CVE-2021-44228 secret=leaked\n")
+
+        src = Path(tmpdir) / "src"
+        src.mkdir()
+        (src / "safe.py").write_text("# CVE-2021-44228\n")
+        link = src / "leak.txt"
+        os.symlink(outside, link)
+
+        results = search_code(str(src), "2021-44228", unsafe=True)
+        paths = {r["path"] for r in results}
+        assert any("safe.py" in p for p in paths)
+        assert any("leak.txt" in p for p in paths), (
+            "rg backend must find symlinked file — requires --follow flag"
+        )
+        assert any("--follow" in arg for arg in captured_args), (
+            "rg command must include --follow in unsafe directory mode"
+        )
