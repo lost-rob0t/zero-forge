@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
 from .agents.smart_agent import generate_artifact, repair_artifact
 from .agents.tool_agent import ToolAgent
@@ -42,7 +42,11 @@ def repair_artifact_node(state: WorkflowState) -> dict[str, Any]:
     repair_context = state.context.model_copy()
     repair_context.extra_notes += f"\nRepair attempt #{state.repair_attempts + 1}"
     repaired = repair_artifact(state.artifact, state.validation, repair_context)
-    return {"artifact": repaired, "repair_attempts": state.repair_attempts + 1, "status": "repaired"}
+    return {
+    "artifact": repaired,
+    "repair_attempts": state.repair_attempts + 1,
+    "status": "repaired",
+}
 
 
 def save_artifact_node(state: WorkflowState) -> dict[str, Any]:
@@ -55,7 +59,11 @@ def save_artifact_node(state: WorkflowState) -> dict[str, Any]:
     if state.validation is None:
         return {"error": "Missing validation result", "status": "failed"}
     if not state.validation.is_valid:
-        errors = "; ".join(state.validation.errors) if state.validation.errors else "Artifact failed validation"
+        errors = (
+    "; ".join(state.validation.errors)
+    if state.validation.errors
+    else "Artifact failed validation"
+)
         return {"error": errors, "status": "failed"}
     if state.artifact is None:
         return {"error": "No artifact to save", "status": "failed"}
@@ -96,7 +104,7 @@ def should_repair_after_fix(state: WorkflowState) -> str:
     return "validate"
 
 
-def build_workflow() -> StateGraph:
+def build_workflow() -> Any:
     """Build and compile the LangGraph workflow."""
     graph = StateGraph(WorkflowState)
     graph.add_node("collect_context", collect_context_node)
@@ -136,5 +144,5 @@ def run_workflow(vuln_input) -> WorkflowState:
     )
     result = app.invoke(initial_state)
     if isinstance(result, dict):
-        result = WorkflowState(**result)
-    return result
+        return WorkflowState(**result)
+    return result  # type: ignore[no-any-return]

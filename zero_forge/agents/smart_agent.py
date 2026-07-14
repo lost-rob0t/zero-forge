@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from ..config import get_settings
 from ..schemas import (
     Artifact,
@@ -13,13 +11,13 @@ from ..schemas import (
     VulnerabilityInput,
 )
 
-
 SYSTEM_PROMPT = """\
 You are a security research expert specializing in exploit development.
 You analyze vulnerabilities and generate security artifacts for authorized testing.
 You write clean, functional Metasploit exploit modules following Metasploit Framework conventions.
 
-CRITICAL: You MUST identify the specific target software, vendor, and vulnerability type from the provided context.
+CRITICAL: You MUST identify the specific target software, vendor,
+and vulnerability type from the provided context.
 - Name the actual software (e.g., "Adobe ColdFusion", "Apache Log4j", "WordPress Plugin X")
 - Reference the actual CVE ID provided in the context
 - Describe the actual vulnerability type (e.g., path traversal, RCE, SQL injection, SSRF)
@@ -224,7 +222,9 @@ def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext)
     )
 
 
-def repair_artifact(artifact: Artifact, validation: ValidationResult, context: CollectedContext) -> Artifact:
+def repair_artifact(
+    artifact: Artifact, validation: ValidationResult, context: CollectedContext
+) -> Artifact:
     prompt = _build_repair_prompt(artifact, validation)
     raw = _call_llm(SYSTEM_PROMPT, prompt)
     code = _extract_code_block(raw)

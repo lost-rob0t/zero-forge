@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from enum import Enum
-from pathlib import Path
-from typing import Any, Optional
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class ArtifactType(str, Enum):
+class ArtifactType(StrEnum):
     """Supported security artifact types."""
 
     METASPLOIT = "metasploit"
@@ -23,7 +22,7 @@ class VulnerabilityInput(BaseModel):
     cve_id: str = Field(..., description="CVE identifier, e.g. CVE-2021-44228")
     poc_text: str = Field(default="", description="Public proof-of-concept text or code")
     writeup_text: str = Field(default="", description="Vulnerability write-up or analysis")
-    source_path: Optional[str] = Field(default=None, description="Path to vulnerable source code")
+    source_path: str | None = Field(default=None, description="Path to vulnerable source code")
     patch_diff: str = Field(default="", description="Patch or git diff as text")
 
 
@@ -72,12 +71,12 @@ class WorkflowState(BaseModel):
     """State flowing through the LangGraph workflow."""
 
     vuln_input: VulnerabilityInput
-    context: Optional[CollectedContext] = None
-    artifact: Optional[Artifact] = None
-    validation: Optional[ValidationResult] = None
+    context: CollectedContext | None = None
+    artifact: Artifact | None = None
+    validation: ValidationResult | None = None
     repair_attempts: int = 0
     max_repair_attempts: int = 3
-    output_path: Optional[str] = None
+    output_path: str | None = None
     status: str = "pending"
     error: str = ""
 

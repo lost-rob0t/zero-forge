@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from ..schemas import CollectedContext, SourceFile, ValidationResult, VulnerabilityInput
 from ..tools.registry import ToolRegistry, create_default_registry
 
@@ -29,7 +27,10 @@ class ToolAgent:
             ctx.cve_description = cve_data.get("description", "")
             ctx.references = cve_data.get("references", [])
             if cve_data.get("published"):
-                ctx.extra_notes = f"CVSS: {cve_data.get('cvss', 'N/A')}, Published: {cve_data['published']}"
+                ctx.extra_notes = (
+    f"CVSS: {cve_data.get('cvss', 'N/A')}, "
+    f"Published: {cve_data['published']}"
+)
         except Exception as e:
             ctx.extra_notes = f"CVE lookup failed: {e}"
 
@@ -62,15 +63,24 @@ class ToolAgent:
         if vuln_input.source_path and vuln_input.cve_id:
             try:
                 pattern = vuln_input.cve_id.replace("CVE-", "")
-                search_results = self.registry.call("search_code", source_path=vuln_input.source_path, pattern=pattern)
+                search_results = self.registry.call(
+                    "search_code",
+                    source_path=vuln_input.source_path,
+                    pattern=pattern,
+                )
                 if search_results:
-                    ctx.extra_notes += f"\nCode search found {len(search_results)} match(es) for '{pattern}'."
+                    ctx.extra_notes += (
+                        f"\nCode search found {len(search_results)} "
+                        f"match(es) for '{pattern}'."
+                    )
             except Exception:
                 pass
 
         return ctx
 
-    def validate_artifact(self, content: str, artifact_type: str = "metasploit") -> ValidationResult:
+    def validate_artifact(
+    self, content: str, artifact_type: str = "metasploit"
+) -> ValidationResult:
         """Validate a generated artifact using registered validation tools."""
         tool_name = f"validate_{artifact_type}"
         if self.registry.has(tool_name):
@@ -79,7 +89,10 @@ class ToolAgent:
                 return ValidationResult(**result)
             except Exception as e:
                 return ValidationResult(is_valid=False, errors=[f"Validation tool error: {e}"])
-        return ValidationResult(is_valid=False, errors=[f"No validator registered for artifact type: {artifact_type}"])
+        return ValidationResult(
+    is_valid=False,
+    errors=[f"No validator registered for artifact type: {artifact_type}"],
+)
 
     def list_available_tools(self) -> list[str]:
         return self.registry.names()

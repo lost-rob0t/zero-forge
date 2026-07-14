@@ -9,7 +9,6 @@ import tempfile
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-
 META_REQUIRED_KEYS = {
     "Name": "Module name",
     "Description": "Module description",
@@ -190,7 +189,8 @@ class DefaultRubyRunner:
             )
             if result.returncode != 0:
                 raise RuntimeError(f"Ruby AST analysis failed: {result.stderr}")
-            return json.loads(result.stdout)
+            data: dict[str, Any] = json.loads(result.stdout)
+            return data
         finally:
             Path(script_path).unlink(missing_ok=True)
 

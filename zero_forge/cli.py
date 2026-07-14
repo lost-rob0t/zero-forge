@@ -12,7 +12,11 @@ from .config import get_settings
 from .schemas import VulnerabilityInput
 from .workflow import run_workflow
 
-app = typer.Typer(name="zero-forge", help="LLM-based security artifact generation harness", no_args_is_help=True)
+app = typer.Typer(
+    name="zero-forge",
+    help="LLM-based security artifact generation harness",
+    no_args_is_help=True,
+)
 console = Console()
 
 
@@ -23,7 +27,8 @@ def generate(
     writeup_file: str = typer.Option("", "--writeup", "-w", help="Path to vulnerability write-up"),
     source_path: str = typer.Option("", "--source", "-s", help="Path to vulnerable source code"),
     patch_file: str = typer.Option("", "--patch", "-d", help="Path to patch/diff file"),
-    output_dir: str = typer.Option("", "--output", "-o", help="Output directory (overrides config)"),
+    output_dir: str = typer.Option("", "--output", "-o",
+                              help="Output directory (overrides config)"),
     config_file: str = typer.Option("", "--config", help="Path to YAML config file"),
 ) -> None:
     """Generate a security artifact from vulnerability context."""
@@ -33,13 +38,16 @@ def generate(
         os.environ["ZERO_FORGE_CONFIG_PATH"] = config_file
         get_settings(reload=True)
 
-    settings = get_settings()
+    get_settings()
 
     console.print(f"[bold]ZeroForge[/] — generating artifact for {cve_id}")
 
-    poc_text = Path(poc_file).read_text(encoding="utf-8", errors="replace") if poc_file else ""
-    writeup_text = Path(writeup_file).read_text(encoding="utf-8", errors="replace") if writeup_file else ""
-    patch_diff = Path(patch_file).read_text(encoding="utf-8", errors="replace") if patch_file else ""
+    def _read(path: str) -> str:
+        return Path(path).read_text(encoding="utf-8", errors="replace") if path else ""
+
+    poc_text = _read(poc_file)
+    writeup_text = _read(writeup_file)
+    patch_diff = _read(patch_file)
 
     vuln_input = VulnerabilityInput(
         cve_id=cve_id,

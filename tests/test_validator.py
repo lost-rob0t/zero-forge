@@ -11,7 +11,6 @@ import pytest
 
 from zero_forge.tools.validator import DefaultRubyRunner, validate_metasploit
 
-
 # --------------------------------------------------------------------------- #
 # Fixtures
 # --------------------------------------------------------------------------- #
@@ -547,6 +546,6 @@ end
         import tempfile
 
         tmp_dir = tempfile.gettempdir()
-        stale = [f for f in glob.glob(os.path.join(tmp_dir, "*.rb"))]
+        stale = list(glob.glob(os.path.join(tmp_dir, "*.rb")))
         # Our temp files should not persist
         assert len(stale) == 0, f"Stale temp files found: {stale}"

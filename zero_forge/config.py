@@ -13,13 +13,11 @@ loaded from YAML files for security reasons.
 from __future__ import annotations
 
 import os
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
-
 
 # --- Sub-models -----------------------------------------------------------
 
@@ -29,7 +27,9 @@ class LLMConfig(BaseModel):
     model: str = Field(default="gpt-4o-mini", description="LiteLLM model identifier")
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, ge=1)
-    openrouter_base_url: str = Field(default="", description="Custom OpenRouter-compatible base URL")
+    openrouter_base_url: str = Field(
+    default="", description="Custom OpenRouter-compatible base URL"
+)
 
 
 class WorkflowConfig(BaseModel):
@@ -63,7 +63,7 @@ class Settings(BaseModel):
 
 # --- Env-var mapping ------------------------------------------------------
 
-_ENV_MAP: dict[str, tuple[str, str]] = {
+_ENV_MAP: dict[str, tuple[str]] = {
     # (env var name, dotted settings path)
     "ZERO_FORGE_MODEL": ("llm.model",),
     "ZERO_FORGE_LLM_TEMPERATURE": ("llm.temperature",),

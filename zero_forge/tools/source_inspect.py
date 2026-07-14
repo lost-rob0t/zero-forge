@@ -8,7 +8,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-
 # --- File classification ------------------------------------------------
 
 _DOC_EXTS = {".md", ".txt", ".rst", ".adoc", ".org"}
@@ -67,7 +66,9 @@ def _should_skip(filepath: str) -> bool:
     return ext in _SKIP_EXTS
 
 
-def read_source_files(source_path: str, max_files: int = 20, max_file_size: int = 51200) -> list[dict[str, Any]]:
+def read_source_files(
+    source_path: str, max_files: int = 20, max_file_size: int = 51200
+) -> list[dict[str, Any]]:
     """Read files from a directory or single file.
 
     Files are categorized (documentation/config/data/code) and sorted with
@@ -83,7 +84,10 @@ def read_source_files(source_path: str, max_files: int = 20, max_file_size: int 
     else:
         files = []
         for root, dirs, filenames in os.walk(base):
-            dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", ".venv", "venv", "build", "dist"}]
+            dirs[:] = [
+    d for d in dirs
+    if d not in {".git", "node_modules", "__pycache__", ".venv", "venv", "build", "dist"}
+]
             for fname in sorted(filenames):
                 files.append(Path(root) / fname)
 
@@ -144,7 +148,10 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
     else:
         files = []
         for root, dirs, filenames in os.walk(base):
-            dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "__pycache__", ".venv", "venv"}]
+            dirs[:] = [
+    d for d in dirs
+    if d not in {".git", "node_modules", "__pycache__", ".venv", "venv"}
+]
             for fname in sorted(filenames):
                 files.append(Path(root) / fname)
 
@@ -160,7 +167,10 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
                 start = max(0, i - 1)
                 end = min(len(lines), i + 2)
                 context = "\n".join(f"{start+j+1}: {lines[start+j]}" for j in range(end - start))
-                results.append({"path": str(fpath), "line_number": i + 1, "line": line.strip(), "context": context})
+                results.append({
+    "path": str(fpath), "line_number": i + 1,
+    "line": line.strip(), "context": context,
+})
                 if len(results) >= max_results:
                     break
 
@@ -169,12 +179,18 @@ def search_code(source_path: str, pattern: str, max_results: int = 10) -> list[d
 
 def git_diff_inspect(diff_text: str = "", repo_path: str = "") -> dict[str, Any]:
     """Inspect a git diff or patch."""
-    result: dict[str, Any] = {"files_changed": [], "additions": 0, "deletions": 0, "diff_summary": ""}
+    result: dict[str, Any] = {
+    "files_changed": [], "additions": 0,
+    "deletions": 0, "diff_summary": "",
+}
 
     diff = diff_text
     if not diff and repo_path:
         try:
-            proc = subprocess.run(["git", "diff", "HEAD"], cwd=repo_path, capture_output=True, text=True, timeout=10)
+            proc = subprocess.run(
+    ["git", "diff", "HEAD"], cwd=repo_path,
+    capture_output=True, text=True, timeout=10,
+)
             diff = proc.stdout
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             pass
