@@ -15,7 +15,7 @@ ZeroForge takes vulnerability context (CVE, PoC, write-up, source code, patch di
 ```
 input CVE + context
   → Tool Agent collects context (CVE lookup, source inspection, git diff)
-  → Smart Agent generates Metasploit module (LLM or stub mode)
+  → Smart Agent generates Metasploit module with an LLM
   → Tool Agent validates the artifact
   → Smart Agent repairs errors (loop, max 3 attempts)
   → Save result to filesystem
@@ -51,7 +51,7 @@ zero_forge/
 # Install
 pip install -e .
 
-# Generate an artifact (stub mode, no API key needed)
+# Generate an artifact (requires a configured provider key)
 python -m zero_forge.cli generate --cve CVE-2021-44228
 
 # With source code and PoC
@@ -96,6 +96,7 @@ All settings can be overridden via environment variables (take priority over YAM
 | `ZERO_FORGE_MODEL` | `llm.model` | `gpt-4o-mini` |
 | `ZERO_FORGE_LLM_TEMPERATURE` | `llm.temperature` | `0.3` |
 | `ZERO_FORGE_LLM_MAX_TOKENS` | `llm.max_tokens` | `4096` |
+| `ZERO_FORGE_STUB_MODE` | `llm.stub_mode` | `false` |
 | `ZERO_FORGE_OPENROUTER_BASE_URL` | `llm.openrouter_base_url` | `""` |
 | `ZERO_FORGE_OUTPUT_DIR` | `output.dir` | `./output` |
 | `ZERO_FORGE_MAX_REPAIR_ATTEMPTS` | `workflow.max_repair_attempts` | `3` |
@@ -118,7 +119,7 @@ print(settings.workflow.max_repair_attempts)  # 3
 
 ## LLM Mode
 
-ZeroForge supports multiple LLM providers via LiteLLM. Provider priority: **OpenRouter > OpenAI > Anthropic > stub**.
+ZeroForge supports multiple LLM providers via LiteLLM. Provider priority: **OpenRouter > OpenAI > Anthropic**. Missing credentials, provider errors, and malformed responses fail the workflow with structured provider/model/retry context.
 
 ### OpenRouter (preferred)
 
@@ -145,9 +146,9 @@ export ANTHROPIC_API_KEY=sk-...
 export ZERO_FORGE_MODEL=claude-3.5-sonnet
 ```
 
-### Stub mode (default)
+### Stub mode (explicit testing only)
 
-No API key required — generates a minimal valid Metasploit module template.
+Set `ZERO_FORGE_STUB_MODE=true` only for local plumbing tests. The generated placeholder is marked as a stub; the workflow terminates as failed and never validates or saves it as a completed exploit.
 
 ## Testing
 

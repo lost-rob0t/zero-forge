@@ -27,6 +27,10 @@ class LLMConfig(BaseModel):
     model: str = Field(default="gpt-4o-mini", description="LiteLLM model identifier")
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, ge=1)
+    stub_mode: bool = Field(
+        default=False,
+        description="Explicitly generate a placeholder for local plumbing tests",
+    )
     openrouter_base_url: str = Field(
     default="", description="Custom OpenRouter-compatible base URL"
 )
@@ -68,6 +72,7 @@ _ENV_MAP: dict[str, tuple[str]] = {
     "ZERO_FORGE_MODEL": ("llm.model",),
     "ZERO_FORGE_LLM_TEMPERATURE": ("llm.temperature",),
     "ZERO_FORGE_LLM_MAX_TOKENS": ("llm.max_tokens",),
+    "ZERO_FORGE_STUB_MODE": ("llm.stub_mode",),
     "ZERO_FORGE_OPENROUTER_BASE_URL": ("llm.openrouter_base_url",),
     "OPENROUTER_BASE_URL": ("llm.openrouter_base_url",),
     "ZERO_FORGE_OUTPUT_DIR": ("output.dir",),

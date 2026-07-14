@@ -245,21 +245,16 @@ def test_validation_errors_preserved_in_final_state(tmp_path):
 
 
 def test_existing_successful_workflow_still_works(tmp_path, monkeypatch):
-    """The existing end-to-end successful path still completes."""
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("ZERO_FORGE_OUTPUT_DIR", str(tmp_path))
-
-    from zero_forge.config import reset_settings
-    from zero_forge.workflow import run_workflow
-
-    reset_settings()
-    vuln_input = _make_vuln_input()
-    result = run_workflow(vuln_input)
-    assert result.status == "completed"
-    assert result.artifact is not None
-    assert result.output_path is not None
-    assert Path(result.output_path).exists()
+    """A real, validated artifact still completes."""
+    result = _run_workflow_with_mocks(
+        artifact_content=_VALID_CONTENT,
+        validation_errors=None,
+        tmp_path=tmp_path,
+    )
+    assert result["status"] == "completed"
+    assert result["artifact"] is not None
+    assert result["output_path"] is not None
+    assert Path(result["output_path"]).exists()
 
 
 # --------------------------------------------------------------------------- #

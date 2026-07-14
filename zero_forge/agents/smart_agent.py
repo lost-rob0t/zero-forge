@@ -9,6 +9,7 @@ from ..schemas import (
     CollectedContext,
     ValidationResult,
     VulnerabilityInput,
+    WorkflowError,
 )
 
 SYSTEM_PROMPT = """\
@@ -35,6 +36,62 @@ When writing a Metasploit module:
 
 Always output the complete module code in a single code block.
 """
+
+
+class LLMCallError(RuntimeError):
+    """Base error for a failed LLM generation attempt."""
+
+    code = "llm_call_error"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str,
+        model: str,
+        retryable: bool,
+        attempt: int = 1,
+        max_attempts: int = 1,
+    ) -> None:
+        self.provider = provider
+        self.model = model
+        self.retryable = retryable
+        self.attempt = attempt
+        self.max_attempts = max_attempts
+        detail = (
+            f"{message} (provider={provider}, model={model}, "
+            f"attempt={attempt}/{max_attempts}, retryable={str(retryable).lower()})"
+        )
+        super().__init__(detail)
+
+    def as_workflow_error(self) -> WorkflowError:
+        return WorkflowError(
+            code=self.code,
+            message=str(self),
+            provider=self.provider,
+            model=self.model,
+            retryable=self.retryable,
+            attempt=self.attempt,
+            max_attempts=self.max_attempts,
+        )
+
+
+class LLMConfigurationError(LLMCallError):
+    """Raised when generation is requested without a configured provider."""
+
+    code = "llm_configuration_error"
+
+
+class LLMProviderError(LLMCallError):
+    """Raised when LiteLLM or the selected provider fails."""
+
+    code = "llm_provider_error"
+
+
+class LLMResponseError(LLMCallError):
+    """Raised when a provider returns an unusable response."""
+
+    code = "llm_response_error"
 
 
 def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> str:
@@ -106,7 +163,7 @@ def _extract_code_block(text: str) -> str:
 def _resolve_provider() -> tuple[str | None, str, dict[str, str]]:
     """Resolve which LLM provider to use and return (api_key, model, extra_kwargs).
 
-    Provider priority: OPENROUTER > OPENAI > ANTHROPIC > stub.
+    Provider priority: OPENROUTER > OPENAI > ANTHROPIC.
     """
     cfg = get_settings()
     or_key = cfg.openrouter_api_key
@@ -135,13 +192,43 @@ def _resolve_provider() -> tuple[str | None, str, dict[str, str]]:
     return None, model, extra_kwargs
 
 
+def _provider_name() -> str:
+    cfg = get_settings()
+    if cfg.openrouter_api_key:
+        return "openrouter"
+    if cfg.openai_api_key:
+        return "openai"
+    if cfg.anthropic_api_key:
+        return "anthropic"
+    return "none"
+
+
+def _is_retryable_provider_error(exc: Exception) -> bool:
+    name = type(exc).__name__.lower()
+    return any(
+        marker in name
+        for marker in ("timeout", "ratelimit", "connection", "serviceunavailable")
+    )
+
+
 def _call_llm(system_prompt: str, user_prompt: str) -> str:
-    api_key, model, extra_kwargs = _resolve_provider()
-    if not api_key:
+    cfg = get_settings()
+    if cfg.llm.stub_mode:
         return _stub_metasploit_module()
+
+    api_key, model, extra_kwargs = _resolve_provider()
+    provider = _provider_name()
+    if not api_key:
+        raise LLMConfigurationError(
+            "No LLM API key configured and stub mode is disabled",
+            provider=provider,
+            model=model,
+            retryable=False,
+        )
+
     try:
         import litellm
-        cfg = get_settings()
+
         response = litellm.completion(
             model=model,
             messages=[
@@ -152,9 +239,32 @@ def _call_llm(system_prompt: str, user_prompt: str) -> str:
             max_tokens=cfg.llm.max_tokens,
             **extra_kwargs,
         )
-        return response.choices[0].message.content or ""
-    except Exception:
-        return _stub_metasploit_module()
+    except Exception as exc:
+        raise LLMProviderError(
+            f"LLM request failed with {type(exc).__name__}",
+            provider=provider,
+            model=model,
+            retryable=_is_retryable_provider_error(exc),
+        ) from exc
+
+    try:
+        content = response.choices[0].message.content
+    except (AttributeError, IndexError, KeyError, TypeError) as exc:
+        raise LLMResponseError(
+            "LLM response did not contain a message",
+            provider=provider,
+            model=model,
+            retryable=False,
+        ) from exc
+
+    if not isinstance(content, str) or not content.strip():
+        raise LLMResponseError(
+            "LLM response contained empty message content",
+            provider=provider,
+            model=model,
+            retryable=False,
+        )
+    return content
 
 
 def _stub_metasploit_module() -> str:
@@ -214,11 +324,16 @@ def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext)
     prompt = _build_context_prompt(vuln_input, context)
     raw = _call_llm(SYSTEM_PROMPT, prompt)
     code = _extract_code_block(raw)
+    cfg = get_settings()
     return Artifact(
         artifact_type=ArtifactType.METASPLOIT,
         content=code,
         filename=f"{context.cve_id.lower().replace('-', '_')}_exploit.rb",
-        metadata={"model": get_settings().llm.model, "cve_id": context.cve_id},
+        metadata={
+            "model": cfg.llm.model,
+            "cve_id": context.cve_id,
+            "stub": cfg.llm.stub_mode,
+        },
     )
 
 

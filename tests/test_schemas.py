@@ -6,6 +6,7 @@ from zero_forge.schemas import (
     CollectedContext,
     ValidationResult,
     VulnerabilityInput,
+    WorkflowError,
     WorkflowState,
 )
 
@@ -54,6 +55,19 @@ def test_workflow_state():
     assert state.max_repair_attempts == 3
     assert state.context is None
     assert state.artifact is None
+    assert state.failure is None
+
+
+def test_workflow_error_context():
+    failure = WorkflowError(
+        code="llm_provider_error",
+        message="request failed",
+        provider="openai",
+        model="gpt-4o",
+        retryable=True,
+    )
+    assert failure.code == "llm_provider_error"
+    assert failure.retryable is True
 
 
 def test_collected_context_defaults():

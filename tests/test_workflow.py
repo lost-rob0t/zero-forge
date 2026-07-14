@@ -1,45 +1,83 @@
-"""Tests for the ZeroForge LangGraph workflow."""
+"""Tests for ZeroForge LangGraph LLM failure handling."""
 
-from pathlib import Path
+from __future__ import annotations
 
-from zero_forge.schemas import VulnerabilityInput
-from zero_forge.workflow import build_workflow, run_workflow
+from zero_forge.agents.smart_agent import LLMProviderError
+from zero_forge.schemas import CollectedContext, VulnerabilityInput, WorkflowState
+from zero_forge.workflow import build_workflow, generate_artifact_node, run_workflow
+
+
+def _input() -> VulnerabilityInput:
+    return VulnerabilityInput(cve_id="CVE-2021-44228")
+
+
+def _disable_provider_keys(monkeypatch) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
 
 def test_workflow_builds():
-    app = build_workflow()
-    assert app is not None
+    assert build_workflow() is not None
 
 
-def test_workflow_runs_end_to_end(tmp_path, monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+def test_workflow_fails_without_credentials(tmp_path, monkeypatch):
+    _disable_provider_keys(monkeypatch)
     monkeypatch.setenv("ZERO_FORGE_OUTPUT_DIR", str(tmp_path))
-
-    vuln_input = VulnerabilityInput(
-        cve_id="CVE-2021-44228",
-        poc_text="print('pwned')",
-        writeup_text="RCE via JNDI lookup",
-        patch_diff="diff --git a/a.py b/a.py\n-old\n+new",
+    monkeypatch.setattr(
+        "zero_forge.workflow.ToolAgent.collect_context",
+        lambda _self, vuln_input: CollectedContext(cve_id=vuln_input.cve_id),
     )
 
-    result = run_workflow(vuln_input)
+    result = run_workflow(_input())
 
-    assert result.status == "completed"
-    assert result.artifact is not None
-    assert result.context is not None
-    assert result.output_path is not None
-    assert Path(result.output_path).exists()
+    assert result.status == "failed"
+    assert result.output_path is None
+    assert result.failure is not None
+    assert result.failure.code == "llm_configuration_error"
+    assert list(tmp_path.iterdir()) == []
 
 
-def test_workflow_repair_loop(tmp_path, monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+def test_explicit_stub_never_completes_or_saves(tmp_path, monkeypatch):
+    _disable_provider_keys(monkeypatch)
+    monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
     monkeypatch.setenv("ZERO_FORGE_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "zero_forge.workflow.ToolAgent.collect_context",
+        lambda _self, vuln_input: CollectedContext(cve_id=vuln_input.cve_id),
+    )
 
-    vuln_input = VulnerabilityInput(cve_id="CVE-2021-44228")
-    result = run_workflow(vuln_input)
+    result = run_workflow(_input())
 
-    assert result.repair_attempts >= 0
-    assert result.validation is not None
-    assert result.output_path is not None
+    assert result.status == "failed"
+    assert result.artifact is not None
+    assert result.artifact.metadata["stub"] is True
+    assert result.output_path is None
+    assert result.failure is not None
+    assert result.failure.code == "stub_artifact"
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_provider_failure_becomes_structured_workflow_error(monkeypatch):
+    failure = LLMProviderError(
+        "LLM request failed with TimeoutError",
+        provider="openai",
+        model="gpt-4o",
+        retryable=True,
+    )
+    monkeypatch.setattr(
+        "zero_forge.workflow.generate_artifact",
+        lambda *_args: (_ for _ in ()).throw(failure),
+    )
+    state = WorkflowState(
+        vuln_input=_input(),
+        context=CollectedContext(cve_id="CVE-2021-44228"),
+    )
+
+    patch = generate_artifact_node(state)
+
+    assert patch["status"] == "failed"
+    assert patch["failure"].code == "llm_provider_error"
+    assert patch["failure"].provider == "openai"
+    assert patch["failure"].model == "gpt-4o"
+    assert patch["failure"].retryable is True
