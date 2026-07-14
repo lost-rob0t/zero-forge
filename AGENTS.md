@@ -33,7 +33,7 @@ This document owns project-wide engineering rules for the ZeroForge codebase. De
 | `zero_forge/workflow.py` | LangGraph workflow and node functions | `build_workflow()`, `run_workflow()`, all node functions, conditional edges, repair loop |
 | `zero_forge/cli.py` | Typer CLI | `generate`, `tools`, `validate` commands |
 | `zero_forge/output.py` | Filesystem output | `save_artifact()`, path validation, symlink/escape guards, metadata sidecar |
-| `zero_forge/agents/smart_agent.py` | LLM-powered artifact generation and repair | `generate_artifact()`, `repair_artifact()`, prompt building, LLM provider resolution, stub fallback |
+| `zero_forge/agents/smart_agent.py` | LLM-powered artifact generation and repair | `generate_artifact()`, `repair_artifact()`, prompt building, provider resolution, typed LLM failures, explicit stub mode |
 | `zero_forge/agents/tool_agent.py` | Context collection and validation dispatch | `ToolAgent` class, `collect_context()`, `validate_artifact()`, `list_available_tools()` |
 | `zero_forge/tools/registry.py` | Tool registry | `ToolRegistry` class, `create_default_registry()` |
 | `zero_forge/tools/cve_lookup.py` | NVD API CVE lookup | `cve_lookup()` |
@@ -47,9 +47,10 @@ This document owns project-wide engineering rules for the ZeroForge codebase. De
 
 - **Schemas are the integration boundary.** All workflow state flows through `WorkflowState` (Pydantic). Nodes return `dict[str, Any]` patches; LangGraph merges them into state.
 - **Config singleton.** `get_settings()` returns a cached `Settings` instance. Tests must call `reset_settings()` (handled by `conftest.py` autouse fixture) before and after each test. CLI `--config` and `--output` flags set env vars then call `get_settings(reload=True)`.
-- **API keys are environment-only.** Never load API keys from YAML. Provider priority: OpenRouter > OpenAI > Anthropic > stub. Keys are `repr=False` on `Settings`.
+- **API keys are environment-only.** Never load API keys from YAML. Provider priority: OpenRouter > OpenAI > Anthropic. Keys are `repr=False` on `Settings`.
 - **LLM provider resolution.** `_resolve_provider()` in `smart_agent.py` auto-prefixes model names (`openrouter/`, `anthropic/`) for LiteLLM routing. OpenAI models need no prefix.
-- **Stub mode.** When no API key is set, or LLM call fails, `_stub_metasploit_module()` generates a minimal valid Metasploit template. All tests must pass without API keys.
+- **LLM failures fail closed.** Missing credentials, provider exceptions, and malformed responses become typed workflow failures with provider, model, retryability, and attempt context. Never substitute a stub for a failed LLM call.
+- **Stub mode is explicit and non-successful.** `ZERO_FORGE_STUB_MODE=true` may generate a placeholder for local plumbing tests. Stub artifacts are marked in metadata and must never be validated, saved, or reported as completed exploits.
 - **Tool registry.** Tools are plain functions registered by name in `ToolRegistry`. `ToolAgent` dispatches by name. New validators follow the `validate_{artifact_type}` naming convention.
 - **Repair loop.** `should_repair_or_finish()` gates the repair→validate cycle. After repair, `should_repair_after_fix()` always re-validates. Max attempts from `WorkflowConfig.max_repair_attempts` (default 3).
 - **Output safety.** `save_artifact()` validates CVE ID format, rejects path separators/parent refs/absolute paths/symlinks in filenames, and ensures destinations stay inside the output root. A `.meta.json` sidecar is written alongside each artifact.
@@ -78,7 +79,7 @@ This document owns project-wide engineering rules for the ZeroForge codebase. De
 - Run full suite: `pytest tests/ -v`
 - Lint: `ruff check .`
 - Type-check: `mypy zero_forge`
-- CLI smoke test (stub mode, no API key): `python -m zero_forge.cli generate --cve CVE-2021-44228`
+- CLI failure smoke test (no API key): `python -m zero_forge.cli generate --cve CVE-2021-44228` must report a failed workflow and write no artifact.
 - Verify output artifacts land in the configured `output.dir` (default `./output/`)
 
 ## Permissions

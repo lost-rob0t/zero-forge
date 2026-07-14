@@ -44,6 +44,7 @@ def test_defaults(clean_env):
     assert s.llm.model == "gpt-4o-mini"
     assert s.llm.temperature == 0.3
     assert s.llm.max_tokens == 4096
+    assert s.llm.stub_mode is False
     assert s.workflow.max_repair_attempts == 3
     assert s.output.dir == "./output"
     assert s.openrouter_api_key == ""
@@ -114,6 +115,12 @@ def test_env_overrides_temperature(clean_env, monkeypatch):
     monkeypatch.setenv("ZERO_FORGE_LLM_TEMPERATURE", "0.9")
     s = load_config()
     assert s.llm.temperature == 0.9
+
+
+def test_env_enables_explicit_stub_mode(clean_env, monkeypatch):
+    monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
+    s = load_config()
+    assert s.llm.stub_mode is True
 
 
 def test_env_api_keys(clean_env, monkeypatch):

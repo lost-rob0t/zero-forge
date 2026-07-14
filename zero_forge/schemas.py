@@ -67,6 +67,18 @@ class ValidationResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class WorkflowError(BaseModel):
+    """Structured failure context retained in workflow state."""
+
+    code: str
+    message: str
+    provider: str = ""
+    model: str = ""
+    retryable: bool = False
+    attempt: int = 1
+    max_attempts: int = 1
+
+
 class WorkflowState(BaseModel):
     """State flowing through the LangGraph workflow."""
 
@@ -79,5 +91,6 @@ class WorkflowState(BaseModel):
     output_path: str | None = None
     status: str = "pending"
     error: str = ""
+    failure: WorkflowError | None = None
 
     model_config = {"arbitrary_types_allowed": True}
