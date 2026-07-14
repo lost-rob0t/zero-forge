@@ -47,6 +47,9 @@ zero_forge/
 
 ## Quick Start
 
+ZeroForge requires Python 3.12 or newer. Metasploit module validation also
+requires Ruby 3.3.8; validation fails closed when Ruby is unavailable.
+
 ```bash
 # Install
 pip install -e .
