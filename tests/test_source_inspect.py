@@ -435,3 +435,127 @@ def test_dotenv_with_extension_excluded():
 
         assert len(readable) == 1
         assert readable[0]["filename"] == "app.py"
+
+
+# --- Code search security tests (issue #31) ----------------------------
+
+
+def test_search_code_safe_excludes_credential_file():
+    """Safe code search must not return lines from credential files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228 patch\n")
+        (Path(tmpdir) / "credentials.json").write_text(
+            '{"note":"2021-44228","token":"SECRET"}\n'
+        )
+
+        results = search_code(tmpdir, "2021-44228")
+        assert len(results) == 1
+        assert "app.py" in results[0]["path"]
+        for r in results:
+            assert "SECRET" not in r.get("line", "")
+            assert "credentials.json" not in r["path"]
+
+
+def test_search_code_safe_excludes_credential_file_fallback(monkeypatch):
+    """Safe code search via Python fallback must not return lines from credential files."""
+    import zero_forge.tools.source_inspect as si
+
+    def _fake_run(*args, **kwargs):
+        raise FileNotFoundError("rg not available")
+
+    monkeypatch.setattr(si.subprocess, "run", _fake_run)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228 patch\n")
+        (Path(tmpdir) / "credentials.json").write_text(
+            '{"note":"2021-44228","token":"SECRET"}\n'
+        )
+
+        results = search_code(tmpdir, "2021-44228")
+        assert len(results) == 1
+        assert "app.py" in results[0]["path"]
+        for r in results:
+            assert "SECRET" not in r.get("line", "")
+            assert "credentials.json" not in r["path"]
+
+
+def test_search_code_safe_excludes_symlink():
+    """Safe code search must not return lines from file symlinks."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        outside = Path(tmpdir) / "_outside.txt"
+        outside.write_text("CVE-2021-44228 secret=leaked\n")
+
+        src = Path(tmpdir) / "src"
+        src.mkdir()
+        (src / "safe.py").write_text("# CVE-2021-44228\n")
+        link = src / "leak.txt"
+        os.symlink(outside, link)
+
+        results = search_code(str(src), "2021-44228")
+        assert len(results) == 1
+        assert "safe.py" in results[0]["path"]
+        for r in results:
+            assert "leaked" not in r.get("line", "")
+            assert "leak.txt" not in r["path"]
+
+
+def test_search_code_safe_excludes_symlink_fallback(monkeypatch):
+    """Safe code search via Python fallback must not return lines from file symlinks."""
+    import zero_forge.tools.source_inspect as si
+
+    def _fake_run(*args, **kwargs):
+        raise FileNotFoundError("rg not available")
+
+    monkeypatch.setattr(si.subprocess, "run", _fake_run)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        outside = Path(tmpdir) / "_outside.txt"
+        outside.write_text("CVE-2021-44228 secret=leaked\n")
+
+        src = Path(tmpdir) / "src"
+        src.mkdir()
+        (src / "safe.py").write_text("# CVE-2021-44228\n")
+        link = src / "leak.txt"
+        os.symlink(outside, link)
+
+        results = search_code(str(src), "2021-44228")
+        assert len(results) == 1
+        assert "safe.py" in results[0]["path"]
+        for r in results:
+            assert "leaked" not in r.get("line", "")
+            assert "leak.txt" not in r["path"]
+
+
+def test_search_code_allowed_paths_restricts_search():
+    """allowed_paths must restrict search to only the specified files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
+        (Path(tmpdir) / "other.py").write_text("# CVE-2021-44228 too\n")
+
+        app_path = str(Path(tmpdir) / "app.py")
+        results = search_code(tmpdir, "2021-44228", allowed_paths=[app_path])
+        assert len(results) == 1
+        assert "app.py" in results[0]["path"]
+        assert "other.py" not in results[0]["path"]
+
+
+def test_search_code_unsafe_searches_all_files():
+    """In unsafe mode, search_code should search all files including secrets."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
+        (Path(tmpdir) / "credentials.json").write_text(
+            '{"note":"2021-44228","token":"SECRET"}\n'
+        )
+
+        results = search_code(tmpdir, "2021-44228", unsafe=True)
+        paths = {r["path"] for r in results}
+        assert any("app.py" in p for p in paths)
+        assert any("credentials.json" in p for p in paths)
+
+
+def test_search_code_empty_allowed_returns_empty():
+    """Empty allowed_paths in safe mode should return no results."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
+        results = search_code(tmpdir, "2021-44228", allowed_paths=[])
+        assert results == []
