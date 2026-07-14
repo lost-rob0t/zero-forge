@@ -2,114 +2,83 @@
 
 ## Purpose
 
-ZeroForge is an LLM-based exploit-development harness for security artifact generation. It takes vulnerability context (CVE, PoC, write-up, source code, patch diff) and generates security artifacts for authorized testing.
+ZeroForge is an LLM-based exploit-development harness that generates security artifacts from vulnerability context for authorized testing. This file defines project-wide rules; add child `AGENTS.md` files only for durable subtree-specific contracts.
 
-This document owns project-wide engineering rules for the ZeroForge codebase. Detailed contracts for subtrees should live in child `AGENTS.md` files when durable boundaries emerge.
+## GitHub Identity
 
-## Agent Conversation Identities
+- Every agent-authored GitHub issue, pull request, review, comment, or reply MUST start with `Hey <model-name> here.` or `t. <model-name>`.
+- Use the exact runtime model name. If unavailable, use `Codex`; never invent a version or substitute a role handle.
+- Never use the repository owner's personal name or login in agent-generated GitHub text, commits, logs, or documentation; use `maintainer` or `operator`.
+- Do not fabricate identities or personal identifiers, or create an `@mention`, unless requested. Platform attribution is outside this rule.
 
-- Never use the repository owner's personal name or GitHub login in agent-generated issues, pull requests, reviews, comments, commit messages, logs, or documentation.
-- Use a stable role handle when a conversation needs named speakers. Approved handles are `forge-maintainer`, `validation-reviewer`, `workflow-reviewer`, `tooling-reviewer`, and `ci-reviewer`.
-- Prefix conversational GitHub text with the selected handle, for example: `**validation-reviewer:** The file parses as Ruby but defines no module class.`
-- Keep one handle per agent for the lifetime of a thread. Refer to the human owner only as `maintainer` or `operator`.
-- Do not fabricate real identities, use personal identifiers, or create an `@mention` unless the operator explicitly requests it.
-- GitHub's platform attribution may still show the authenticated account; these rules govern the text agents generate.
+## GitHub Flow and Coordination
+
+- Assume agents work concurrently across computers, sessions, clones, branches, and worktrees. GitHub remote state is the source of truth.
+- Before acting or posting, refresh `master`, the linked issue/PR and comments/threads, related open issues/PRs/branches, and current CI.
+- Never commit to `master`. Branch from current `master`; prefer `<model-slug>/<issue-number>-<task-slug>-<short-id>`. Keep one focused PR and open it as a draft early.
+- Relevant tests must pass before committing. For documentation-only changes, inspect the Markdown and diff; CI remains the merge gate.
+- Put scope, blockers, decisions, and review responses in the relevant GitHub thread. Stop conflicting edits and coordinate when work overlaps.
+- Never reuse, reset, force-push, delete, overwrite, or amend another agent's branch or commits without explicit authorization.
+
+## Code Review
+
+- Inspect the PR body and full patch, linked issues and latest comments, conversation and unresolved threads, current-head CI, and related open PRs/issues.
+- Re-fetch GitHub state before posting. Post findings or answers to the relevant thread with the required introduction, concrete references, and blockers separated from suggestions.
 
 ## Project
 
-- Stack: Python 3.12+, LangGraph, Pydantic v2, Typer, Rich, LiteLLM, PyYAML.
-- Install with `pip install -e .` (or `pip install -e ".[dev]"` for development extras including ruff, mypy, pytest-cov).
-- CLI entry point: `python -m zero_forge.cli` or the `zero-forge` console script.
-- Run tests with `pytest tests/ -v`.
-- CI: GitHub Actions on push/PR to `master` — ruff lint, mypy type-check, pytest with coverage on Python 3.12 and 3.13.
-- Human-facing documentation lives in `README.md`.
+- Python 3.12+; LangGraph, Pydantic v2, Typer, Rich, LiteLLM, and PyYAML.
+- Install: `pip install -e .` or `pip install -e ".[dev]"`.
+- CLI: `zero-forge` or `python -m zero_forge.cli`.
+- Human-facing documentation belongs in `README.md`.
 
 ## Ownership
 
-| Path | Owner | Scope |
-| --- | --- | --- |
-| `zero_forge/schemas.py` | Pydantic input, state, and artifact schemas | `ArtifactType`, `VulnerabilityInput`, `SourceFile`, `CollectedContext`, `Artifact`, `ValidationResult`, `WorkflowState` |
-| `zero_forge/config.py` | Centralized configuration | `Settings`, `LLMConfig`, `WorkflowConfig`, `OutputConfig`, env-var mapping, YAML loading, singleton cache |
-| `zero_forge/workflow.py` | LangGraph workflow and node functions | `build_workflow()`, `run_workflow()`, all node functions, conditional edges, repair loop |
-| `zero_forge/cli.py` | Typer CLI | `generate`, `tools`, `validate` commands |
-| `zero_forge/output.py` | Filesystem output | `save_artifact()`, path validation, symlink/escape guards, metadata sidecar |
-| `zero_forge/agents/smart_agent.py` | LLM-powered artifact generation and repair | `generate_artifact()`, `repair_artifact()`, prompt building, provider resolution, typed LLM failures, explicit stub mode |
-| `zero_forge/agents/tool_agent.py` | Context collection and validation dispatch | `ToolAgent` class, `collect_context()`, `validate_artifact()`, `list_available_tools()` |
-| `zero_forge/tools/registry.py` | Tool registry | `ToolRegistry` class, `create_default_registry()` |
-| `zero_forge/tools/cve_lookup.py` | NVD API CVE lookup | `cve_lookup()` |
-| `zero_forge/tools/source_inspect.py` | Source inspection | `read_source_files()`, `search_code()`, `git_diff_inspect()`, file categorization and language detection |
-| `zero_forge/tools/validator.py` | Metasploit module validation | `validate_metasploit()` |
-| `tests/` | Pytest regression and contract tests | One test file per module; `conftest.py` resets config singleton |
-| `config.example.yaml` | Configuration template | Non-secret YAML defaults |
-| `.github/workflows/` | CI/CD pipelines | `ci.yml` (lint, type-check, test), `release.yml` |
-
-## Local Contracts
-
-- **Schemas are the integration boundary.** All workflow state flows through `WorkflowState` (Pydantic). Nodes return `dict[str, Any]` patches; LangGraph merges them into state.
-- **Config singleton.** `get_settings()` returns a cached `Settings` instance. Tests must call `reset_settings()` (handled by `conftest.py` autouse fixture) before and after each test. CLI `--config` and `--output` flags set env vars then call `get_settings(reload=True)`.
-- **API keys are environment-only.** Never load API keys from YAML. Provider priority: OpenRouter > OpenAI > Anthropic. Keys are `repr=False` on `Settings`.
-- **LLM provider resolution.** `_resolve_provider()` in `smart_agent.py` auto-prefixes model names (`openrouter/`, `anthropic/`) for LiteLLM routing. OpenAI models need no prefix.
-- **LLM failures fail closed.** Missing credentials, provider exceptions, and malformed responses become typed workflow failures with provider, model, retryability, and attempt context. Never substitute a stub for a failed LLM call.
-- **Stub mode is explicit and non-successful.** `ZERO_FORGE_STUB_MODE=true` may generate a placeholder for local plumbing tests. Stub artifacts are marked in metadata and must never be validated, saved, or reported as completed exploits.
-- **Tool registry.** Tools are plain functions registered by name in `ToolRegistry`. `ToolAgent` dispatches by name. New validators follow the `validate_{artifact_type}` naming convention.
-- **Repair loop.** `should_repair_or_finish()` gates the repair→validate cycle. After repair, `should_repair_after_fix()` always re-validates. Max attempts from `WorkflowConfig.max_repair_attempts` (default 3).
-- **Output safety.** `save_artifact()` validates CVE ID format, rejects path separators/parent refs/absolute paths/symlinks in filenames, and ensures destinations stay inside the output root. A `.meta.json` sidecar is written alongside each artifact.
-- **Source inspection.** `read_source_files()` categorizes files (documentation > config > data > code), skips binaries, caps at 20 files / 50 KB each. `search_code()` prefers `rg` (ripgrep) with Python fallback. `git_diff_inspect()` parses diff text for changed files and additions/deletions.
-
-## Work Guidance
-
-- Read the target module and its tests before editing. Tests mirror the module name (e.g., `test_config.py` ↔ `config.py`).
-- Make minimal focused changes. Match existing style (double quotes, type hints, `from __future__ import annotations`).
-- Do not edit `pyproject.toml`, `config.example.yaml`, `.github/workflows/`, or generated files unless the task requires it.
-- When adding a new tool: implement the function in `tools/`, register it in `create_default_registry()`, add a test in `tests/`.
-- When adding a new artifact type: extend `ArtifactType` enum, add a `validate_{type}` function, register it, and update `ToolAgent.validate_artifact()` dispatch.
-- When changing config: update `config.py`, `config.example.yaml`, env var table in `README.md`, and `test_config.py`.
-- Clean up temp files, caches, and background processes you create.
-
-## Pull Request Merge Gate
-
-- Never merge a pull request or enable auto-merge until every required CI job has succeeded on the pull request's current head SHA.
-- Required CI jobs are `lint`, `type-check`, `test (3.12)`, and `test (3.13)` from the `CI` workflow.
-- A pending, skipped, cancelled, timed-out, action-required, neutral, or failed job is not a pass.
-- If the pull request head changes, discard the previous result and wait for CI to succeed again.
-
-## Verification
-
-- Run targeted tests: `pytest tests/test_<module>.py -v`
-- Run full suite: `pytest tests/ -v`
-- Lint: `ruff check .`
-- Type-check: `mypy zero_forge`
-- CLI failure smoke test (no API key): `python -m zero_forge.cli generate --cve CVE-2021-44228` must report a failed workflow and write no artifact.
-- Verify output artifacts land in the configured `output.dir` (default `./output/`)
-
-## Permissions
-
-Allowed without asking:
-
-- Read all project files.
-- Edit files under `zero_forge/` and `tests/`.
-- Create new modules under `zero_forge/`.
-
-Ask before:
-
-- Modifying `pyproject.toml` or adding dependencies.
-- Editing `.github/workflows/`.
-- Deleting files outside of `output/` or temp directories.
-
-## Child DOX Index
-
-No child `AGENTS.md` files exist yet. Create one only when a subtree (e.g., `zero_forge/tools/` or `zero_forge/agents/`) develops a durable boundary with distinct ownership or workflow.
-
-| Child | Scope |
+| Path | Responsibility |
 | --- | --- |
-| _(none yet)_ | _Create when a subtree needs its own contract._ |
+| `zero_forge/schemas.py` | Input, workflow-state, artifact, and validation schemas |
+| `zero_forge/config.py` | Settings, environment/YAML mapping, singleton cache |
+| `zero_forge/workflow.py` | LangGraph nodes, routing, retries, and repair loop |
+| `zero_forge/cli.py` | Typer commands |
+| `zero_forge/output.py` | Safe artifact and metadata-sidecar writes |
+| `zero_forge/agents/smart_agent.py` | LLM generation, repair, prompts, and provider errors |
+| `zero_forge/agents/tool_agent.py` | Context collection and validation dispatch |
+| `zero_forge/tools/` | Registry, CVE/source tools, and validators |
+| `tests/` | Pytest contracts; `conftest.py` resets settings |
+| `config.example.yaml` | Non-secret configuration defaults |
+| `.github/workflows/` | CI and release pipelines |
 
-## Intentionally Unindexed
+## Core Contracts
 
-| Path | Reason |
-| --- | --- |
-| `output/` | Generated artifacts and metadata sidecars. |
-| `.a0proj/` | Agent Zero project data, memory, plugins, and settings. |
-| `.mypy_cache/`, `.ruff_cache/`, `.pytest_cache/` | Generated tool caches. |
-| `__pycache__/`, `*.egg-info/` | Python bytecode and packaging artifacts. |
-| `venv/` | Local virtual environment. |
+- `WorkflowState` is the integration boundary. Nodes return `dict[str, Any]` patches for LangGraph to merge.
+- `get_settings()` is cached. Tests reset it; CLI configuration changes call `get_settings(reload=True)`.
+- API keys are environment-only and `repr=False`. Provider priority is OpenRouter, OpenAI, then Anthropic; `_resolve_provider()` applies LiteLLM prefixes.
+- LLM failures become typed workflow failures with provider, model, retryability, and attempt context. Never silently substitute a stub.
+- `ZERO_FORGE_STUB_MODE=true` is plumbing-only. Stub artifacts are marked and must not be validated, saved, or reported as completed exploits.
+- Tools are registered functions. Validators use `validate_{artifact_type}`; `ToolAgent` dispatches them.
+- Repairs always revalidate and stop at `WorkflowConfig.max_repair_attempts`.
+- `save_artifact()` validates CVE IDs and rejects unsafe, escaping, or symlinked paths; metadata uses a sibling `.meta.json`.
+- Source inspection skips binaries, caps reads at 20 files and 50 KB each, prefers `rg`, and parses Git diffs.
+
+## Work Rules
+
+- Read the target module and matching tests first. Make focused changes using existing style: double quotes, type hints, and `from __future__ import annotations`.
+- Do not edit `pyproject.toml`, `config.example.yaml`, workflows, or generated files unless required.
+- New tools need implementation, registry entry, and tests. New artifact types need enum, validator, registration, and dispatch updates.
+- Config changes update `config.py`, `config.example.yaml`, the README environment table, and tests.
+- Clean up temporary files, caches, and background processes you create.
+
+## Verification and Merge Gate
+
+- Targeted: `pytest tests/test_<module>.py -v`
+- Full: `pytest tests/ -v`
+- Static checks: `ruff check .` and `mypy zero_forge`
+- No-key smoke test: `python -m zero_forge.cli generate --cve CVE-2021-44228` must fail without writing an artifact.
+- Confirm artifacts land in configured `output.dir` (default `./output/`).
+- Never merge or enable auto-merge until `lint`, `type-check`, `test (3.12)`, and `test (3.13)` succeed on the current head. Any other state is not a pass; a new head invalidates old results.
+
+## Permissions and Scope
+
+- Allowed: read the project, edit `zero_forge/` and `tests/`, and add modules under `zero_forge/`.
+- Ask before changing dependencies/`pyproject.toml`, editing workflows, or deleting outside `output/` and temporary directories.
+- No child `AGENTS.md` files exist. Ignore generated `output/`, `.a0proj/`, caches, bytecode, egg-info, and `venv/`.
