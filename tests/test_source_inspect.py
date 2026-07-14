@@ -154,3 +154,64 @@ def test_git_diff_inspect_empty():
     assert result["files_changed"] == []
     assert result["additions"] == 0
     assert result["deletions"] == 0
+
+
+def test_git_diff_inspect_preserves_filename_beginning_with_b():
+    diff = """diff --git a/bbb.py b/bbb.py
+--- a/bbb.py
++++ b/bbb.py
++x
+"""
+    assert git_diff_inspect(diff)["files_changed"] == ["bbb.py"]
+
+
+def test_git_diff_inspect_preserves_unquoted_path_with_spaces():
+    diff = """diff --git a/file with spaces.py b/file with spaces.py
+--- a/file with spaces.py
++++ b/file with spaces.py
++x
+"""
+    assert git_diff_inspect(diff)["files_changed"] == ["file with spaces.py"]
+
+
+def test_git_diff_inspect_preserves_quoted_path_with_spaces():
+    diff = """diff --git "a/file with spaces.py" "b/file with spaces.py"
+--- "a/file with spaces.py"
++++ "b/file with spaces.py"
++x
+"""
+    assert git_diff_inspect(diff)["files_changed"] == ["file with spaces.py"]
+
+
+def test_git_diff_inspect_rename_reports_destination():
+    diff = """diff --git a/old.py b/better.py
+similarity index 100%
+rename from old.py
+rename to better.py
+"""
+    assert git_diff_inspect(diff)["files_changed"] == ["better.py"]
+
+
+def test_git_diff_inspect_new_file_ignores_dev_null():
+    diff = """diff --git a/new.py b/new.py
+new file mode 100644
+--- /dev/null
++++ b/new.py
++x
+"""
+    result = git_diff_inspect(diff)
+    assert result["files_changed"] == ["new.py"]
+    assert result["additions"] == 1
+
+
+def test_git_diff_inspect_deleted_file_ignores_dev_null():
+    diff = """diff --git a/deleted.py b/deleted.py
+deleted file mode 100644
+--- a/deleted.py
++++ /dev/null
+-x
+"""
+    result = git_diff_inspect(diff)
+    assert result["files_changed"] == ["deleted.py"]
+    assert result["deletions"] == 1
+
