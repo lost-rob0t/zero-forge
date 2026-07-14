@@ -1,9 +1,14 @@
 """Tests for ZeroForge schemas."""
 
+import pytest
+from pydantic import ValidationError
+
 from zero_forge.schemas import (
     Artifact,
     ArtifactType,
     CollectedContext,
+    ToolCall,
+    ToolRequest,
     ValidationResult,
     VulnerabilityInput,
     WorkflowError,
@@ -75,3 +80,20 @@ def test_collected_context_defaults():
     assert ctx.cve_description == ""
     assert ctx.source_files == []
     assert ctx.references == []
+
+
+def test_tool_schemas_reject_unknown_fields():
+    request = ToolRequest(
+        objective="Inspect a file",
+        allowed_tools=["read_source_files"],
+    )
+    assert request.allowed_tools == ["read_source_files"]
+
+    with pytest.raises(ValidationError, match="artifact_content"):
+        ToolCall.model_validate(
+            {
+                "name": "read_source_files",
+                "arguments": {},
+                "artifact_content": "not allowed",
+            }
+        )

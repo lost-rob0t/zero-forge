@@ -21,8 +21,8 @@ input CVE + context
   → Save result to filesystem
 ```
 
-- **Smart Agent** (`agents/smart_agent.py`): analyzes the vulnerability and writes artifacts using LiteLLM.
-- **Tool Agent** (`agents/tool_agent.py`): performs tool calls, searches, repository inspection, and validation.
+- **Smart Agent** (`agents/smart_agent.py`): uses the independently configured Smart model for analysis, artifact writing, repair, and review.
+- **Tool Agent** (`agents/tool_agent.py`): uses the independently configured cheap/fast Tool model only to select allowlisted registered tools and construct strict calls. Deterministic Python validates arguments and executes them.
 - **LangGraph** (`workflow.py`): controls the workflow and passes results between both agents.
 - **Tool Registry** (`tools/registry.py`): simple registration and dispatch of named tool functions.
 
@@ -96,11 +96,17 @@ All settings can be overridden via environment variables (take priority over YAM
 
 | Variable | Setting | Default |
 |---|---|---|
-| `ZERO_FORGE_MODEL` | `llm.model` | `gpt-4o-mini` |
-| `ZERO_FORGE_LLM_TEMPERATURE` | `llm.temperature` | `0.3` |
-| `ZERO_FORGE_LLM_MAX_TOKENS` | `llm.max_tokens` | `4096` |
+| `ZERO_FORGE_SMART_PROVIDER` | `models.smart.provider` | `auto` |
+| `ZERO_FORGE_SMART_MODEL` | `models.smart.model` | `gpt-4o` |
+| `ZERO_FORGE_SMART_TEMPERATURE` | `models.smart.temperature` | `0.3` |
+| `ZERO_FORGE_SMART_MAX_TOKENS` | `models.smart.max_tokens` | `4096` |
+| `ZERO_FORGE_SMART_BASE_URL` | `models.smart.base_url` | `""` |
+| `ZERO_FORGE_TOOL_PROVIDER` | `models.tool.provider` | `auto` |
+| `ZERO_FORGE_TOOL_MODEL` | `models.tool.model` | `gpt-4o-mini` |
+| `ZERO_FORGE_TOOL_TEMPERATURE` | `models.tool.temperature` | `0.0` |
+| `ZERO_FORGE_TOOL_MAX_TOKENS` | `models.tool.max_tokens` | `1024` |
+| `ZERO_FORGE_TOOL_BASE_URL` | `models.tool.base_url` | `""` |
 | `ZERO_FORGE_STUB_MODE` | `llm.stub_mode` | `false` |
-| `ZERO_FORGE_OPENROUTER_BASE_URL` | `llm.openrouter_base_url` | `""` |
 | `ZERO_FORGE_OUTPUT_DIR` | `output.dir` | `./output` |
 | `ZERO_FORGE_MAX_REPAIR_ATTEMPTS` | `workflow.max_repair_attempts` | `3` |
 | `OPENROUTER_API_KEY` | `openrouter_api_key` | `""` |
@@ -115,38 +121,48 @@ All settings can be overridden via environment variables (take priority over YAM
 from zero_forge.config import get_settings
 
 settings = get_settings()
-print(settings.llm.model)             # gpt-4o-mini
+print(settings.models.smart.model)    # gpt-4o
+print(settings.models.tool.model)     # gpt-4o-mini
 print(settings.output.dir)           # ./output
 print(settings.workflow.max_repair_attempts)  # 3
 ```
 
 ## LLM Mode
 
-ZeroForge supports multiple LLM providers via LiteLLM. Provider priority: **OpenRouter > OpenAI > Anthropic**. Missing credentials, provider errors, and malformed responses fail the workflow with structured provider/model/retry context.
+ZeroForge supports multiple LLM providers via LiteLLM. Smart and Tool roles have independent provider, model, temperature, token, and base-URL settings. With `provider: auto`, provider priority is **OpenRouter > OpenAI > Anthropic**. Missing credentials, provider errors, malformed Tool calls, disallowed tools, and invalid arguments fail closed with role/provider/model context.
+
+Legacy single-model YAML such as `llm.model` and environment variables such as `ZERO_FORGE_MODEL` are rejected with a migration error. Configure both roles explicitly instead of silently sharing one model.
 
 ### OpenRouter (preferred)
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
-# Model name without prefix; ZeroForge auto-adds openrouter/
-export ZERO_FORGE_MODEL=meta-llama/llama-3-70b-instruct
+export ZERO_FORGE_SMART_MODEL=anthropic/claude-sonnet-4
+export ZERO_FORGE_TOOL_MODEL=openai/gpt-4o-mini
 
-# Optional: custom OpenRouter-compatible base URL
-export OPENROUTER_BASE_URL=https://custom.endpoint/v1
+# Optional independent OpenRouter-compatible endpoints
+export ZERO_FORGE_SMART_BASE_URL=https://smart.endpoint/v1
+export ZERO_FORGE_TOOL_BASE_URL=https://tool.endpoint/v1
 ```
 
 ### OpenAI
 
 ```bash
 export OPENAI_API_KEY=sk-...
-export ZERO_FORGE_MODEL=gpt-4o
+export ZERO_FORGE_SMART_PROVIDER=openai
+export ZERO_FORGE_SMART_MODEL=gpt-4o
+export ZERO_FORGE_TOOL_PROVIDER=openai
+export ZERO_FORGE_TOOL_MODEL=gpt-4o-mini
 ```
 
 ### Anthropic
 
 ```bash
 export ANTHROPIC_API_KEY=sk-...
-export ZERO_FORGE_MODEL=claude-3.5-sonnet
+export ZERO_FORGE_SMART_PROVIDER=anthropic
+export ZERO_FORGE_SMART_MODEL=claude-3.5-sonnet
+export ZERO_FORGE_TOOL_PROVIDER=anthropic
+export ZERO_FORGE_TOOL_MODEL=claude-3-haiku
 ```
 
 ### Stub mode (explicit testing only)

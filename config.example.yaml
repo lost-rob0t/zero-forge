@@ -1,20 +1,31 @@
 # ZeroForge configuration example
 # Copy to zeroforge.yaml and edit as needed.
-# API keys are NOT stored here — set them as environment variables:
+# API keys are environment-only:
 #   export OPENROUTER_API_KEY="sk-..."
 #   export OPENAI_API_KEY="sk-..."
 #   export ANTHROPIC_API_KEY="sk-..."
 
+models:
+  smart:
+    provider: "auto"            # auto, openrouter, openai, or anthropic
+    model: "gpt-4o"             # reasoning and artifact-writing model
+    temperature: 0.3
+    max_tokens: 4096
+    base_url: ""                # optional LiteLLM-compatible endpoint
+
+  tool:
+    provider: "auto"            # independently resolved provider
+    model: "gpt-4o-mini"        # cheap/fast registered-tool caller
+    temperature: 0.0
+    max_tokens: 1024
+    base_url: ""                # may differ from the Smart model endpoint
+
 llm:
-  model: "gpt-4o-mini"          # LiteLLM model identifier
-  temperature: 0.3               # 0.0–2.0
-  max_tokens: 4096
-  stub_mode: false                  # explicit placeholder mode; never completes/saves
-  openrouter_base_url: ""       # custom OpenRouter-compatible base URL
+  stub_mode: false              # placeholder mode; never completes or saves
 
 workflow:
-  max_repair_attempts: 3        # validation→repair loop ceiling
-  unsafe_source_collection: false  # allow reading secrets and following symlinks
+  max_repair_attempts: 3
+  unsafe_source_collection: false
 
 output:
-  dir: "./output"               # artifact output directory
+  dir: "./output"

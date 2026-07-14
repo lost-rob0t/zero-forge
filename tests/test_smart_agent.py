@@ -155,7 +155,7 @@ def test_resolve_provider_openrouter(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("ZERO_FORGE_MODEL", "meta-llama/llama-3-70b-instruct")
+    monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "meta-llama/llama-3-70b-instruct")
 
     api_key, model, extra = _resolve_provider()
     assert api_key == "sk-or-test"
@@ -166,7 +166,7 @@ def test_resolve_provider_openrouter(monkeypatch):
 def test_resolve_provider_openrouter_already_prefixed(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("ZERO_FORGE_MODEL", "openrouter/anthropic/claude-3.5-sonnet")
+    monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "openrouter/anthropic/claude-3.5-sonnet")
 
     api_key, model, _ = _resolve_provider()
     assert api_key == "sk-or-test"
@@ -175,7 +175,7 @@ def test_resolve_provider_openrouter_already_prefixed(monkeypatch):
 
 def test_resolve_provider_openrouter_base_url(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
-    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://custom.openrouter.proxy/v1")
+    monkeypatch.setenv("ZERO_FORGE_SMART_BASE_URL", "https://custom.openrouter.proxy/v1")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
@@ -188,7 +188,7 @@ def test_resolve_provider_openai_fallback(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setenv("ZERO_FORGE_MODEL", "gpt-4o")
+    monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "gpt-4o")
 
     api_key, model, _ = _resolve_provider()
     assert api_key == "sk-openai"
@@ -199,7 +199,7 @@ def test_resolve_provider_anthropic(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic")
-    monkeypatch.setenv("ZERO_FORGE_MODEL", "claude-3.5-sonnet")
+    monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "claude-3.5-sonnet")
 
     api_key, model, _ = _resolve_provider()
     assert api_key == "sk-anthropic"
