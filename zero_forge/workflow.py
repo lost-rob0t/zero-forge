@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from .agents.smart_agent import LLMCallError, generate_artifact, repair_artifact
 from .agents.tool_agent import ToolAgent
@@ -145,7 +146,7 @@ def should_repair_after_fix(state: WorkflowState) -> str:
     return "validate"
 
 
-def build_workflow() -> Any:
+def build_workflow() -> CompiledStateGraph[WorkflowState, None, WorkflowState, WorkflowState]:
     """Build and compile the LangGraph workflow."""
     graph = StateGraph(WorkflowState)
     graph.add_node("collect_context", collect_context_node)
@@ -188,6 +189,8 @@ def run_workflow(vuln_input) -> WorkflowState:
         max_repair_attempts=get_settings().workflow.max_repair_attempts,
     )
     result = app.invoke(initial_state)
+    if isinstance(result, WorkflowState):
+        return result
     if isinstance(result, dict):
         return WorkflowState(**result)
-    return result  # type: ignore[no-any-return]
+    raise TypeError(f"LangGraph invoke() returned unexpected type {type(result).__name__}")
