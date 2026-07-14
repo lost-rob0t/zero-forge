@@ -65,6 +65,13 @@ This document owns project-wide engineering rules for the ZeroForge codebase. De
 - When changing config: update `config.py`, `config.example.yaml`, env var table in `README.md`, and `test_config.py`.
 - Clean up temp files, caches, and background processes you create.
 
+## Pull Request Merge Gate
+
+- Never merge a pull request or enable auto-merge until every required CI job has succeeded on the pull request's current head SHA.
+- Required CI jobs are `lint`, `type-check`, `test (3.12)`, and `test (3.13)` from the `CI` workflow.
+- A pending, skipped, cancelled, timed-out, action-required, neutral, or failed job is not a pass.
+- If the pull request head changes, discard the previous result and wait for CI to succeed again.
+
 ## Verification
 
 - Run targeted tests: `pytest tests/test_<module>.py -v`
