@@ -98,6 +98,17 @@ def test_save_artifact_rejects_empty_filename(tmp_path):
     assert Path(path).exists()
 
 
+def test_save_artifact_allows_empty_cve_id(tmp_path):
+    """An empty cve_id in metadata should not trigger validation failure (issue #68)."""
+    art = _make_artifact("source_only.rb", cve_id="")
+    path = save_artifact(art, output_dir=tmp_path)
+    assert Path(path).exists()
+
+    meta_path = Path(path).with_suffix(".rb.meta.json")
+    meta = json.loads(meta_path.read_text())
+    assert meta["cve_id"] == ""
+
+
 def test_save_artifact_rejects_cve_id_with_traversal(tmp_path):
     art = _make_artifact("valid.rb", cve_id="../../etc/passwd")
     with pytest.raises(ArtifactPathError, match="Invalid CVE ID"):

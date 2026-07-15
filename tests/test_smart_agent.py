@@ -254,6 +254,43 @@ def test_repair_artifact_uses_llm_output(monkeypatch):
     assert "MetasploitModule" in repaired.content
 
 
+def test_build_context_prompt_omits_cve_when_empty():
+    """When cve_id is empty, the prompt uses a source-only header (issue #68)."""
+    from zero_forge.agents.smart_agent import _build_context_prompt
+
+    ctx = CollectedContext(cve_id="", poc_text="print('pwned')")
+    prompt = _build_context_prompt(VulnerabilityInput(cve_id=""), ctx)
+    assert "## Source-Only Analysis" in prompt
+    assert "## CVE:" not in prompt
+    assert "print('pwned')" in prompt
+
+
+def test_build_context_prompt_includes_cve_when_present():
+    """When cve_id is present, the prompt includes the CVE header (issue #68)."""
+    from zero_forge.agents.smart_agent import _build_context_prompt
+
+    ctx = CollectedContext(cve_id="CVE-2021-44228", cve_description="Log4Shell")
+    prompt = _build_context_prompt(VulnerabilityInput(cve_id="CVE-2021-44228"), ctx)
+    assert "## CVE: CVE-2021-44228" in prompt
+    assert "## Source-Only Analysis" not in prompt
+
+
+def test_generate_artifact_uses_timestamp_filename_when_no_cve(monkeypatch):
+    """When cve_id is empty, the artifact filename uses a timestamp (issue #68)."""
+    monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    ctx = CollectedContext(cve_id="")
+    artifact = generate_artifact(VulnerabilityInput(cve_id=""), ctx)
+
+    assert artifact.filename.startswith("poc_")
+    assert artifact.filename.endswith(".rb")
+    assert "CVE" not in artifact.filename
+    assert artifact.metadata["cve_id"] == ""
+
+
 def test_resolve_provider_openrouter(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
