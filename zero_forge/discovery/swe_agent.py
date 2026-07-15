@@ -6,10 +6,9 @@ Per the maintainer's simplified direction in issue #28:
 - The exploit phase agent receives the file path to the flag.
 - The flag must be randomized so it cannot be guessed.
 
-This module provides the deterministic setup logic.  When an LLM is
-available, the Smart Agent can drive the setup; when stub mode is active
-or no provider is configured, the setup falls back to a local filesystem
-flag placement so tests can exercise the full workflow without Docker.
+Flag placement is delegated to ``flag_gen.sh`` for simplicity — a small
+shell script that reads ``/dev/urandom`` and writes the flag to a file.
+Docker compose setup is a separate concern handled when Docker is available.
 """
 
 from __future__ import annotations
@@ -28,6 +27,7 @@ logger = get_logger(__name__)
 DOCKER_TIMEOUT = 60.0
 DEFAULT_FLAG_DIR = "/tmp/zeroforge-target"
 DEFAULT_FLAG_FILENAME = "flag.txt"
+_SCRIPT_PATH = Path(__file__).resolve().parent / "flag_gen.sh"
 
 
 def _check_docker_available() -> bool:
@@ -77,6 +77,39 @@ def _write_docker_compose(
     return str(compose_path.resolve())
 
 
+def _generate_flag_via_script(output_dir: str, filename: str) -> dict[str, str]:
+    """Run ``flag_gen.sh`` to generate and place a randomized flag.
+
+    Falls back to the Python implementation if the script is unavailable.
+    Returns a dict with ``flag`` and ``flag_path`` keys.
+    """
+    if _SCRIPT_PATH.is_file():
+        try:
+            result = subprocess.run(
+                ["bash", str(_SCRIPT_PATH), output_dir, filename],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                shell=False,
+            )
+            if result.returncode == 0:
+                parsed = json.loads(result.stdout.strip())
+                return {"flag": parsed["flag"], "flag_path": parsed["flag_path"]}
+            logger.warning(
+                "flag_gen.sh failed (rc=%d): %s; falling back to Python",
+                result.returncode,
+                result.stderr.strip(),
+            )
+        except Exception as exc:
+            logger.warning("flag_gen.sh execution failed: %s; falling back to Python", exc)
+
+    # Fallback: use the Python implementation
+    flag = generate_flag()
+    flag_path = str(Path(output_dir) / filename)
+    resolved = write_flag_to_path(flag, flag_path)
+    return {"flag": flag, "flag_path": resolved}
+
+
 def setup_target_environment(
     target: Target,
     *,
@@ -86,25 +119,26 @@ def setup_target_environment(
 ) -> SWESetupResult:
     """Configure the target environment and place a randomized flag.
 
+    Uses ``flag_gen.sh`` for flag placement when available — a simple
+    shell script that reads ``/dev/urandom``.  Falls back to the Python
+    implementation when the script is missing.
+
     When Docker is available and ``use_docker`` is True, this writes a
     docker-compose.yml and starts the service.  When Docker is unavailable,
     it falls back to placing the flag on the local filesystem so the
     workflow can still be exercised in tests.
-
-    The flag is always randomized using ``secrets.token_hex``.
     """
-    flag = generate_flag()
     flag_dir = Path(output_dir)
     flag_dir.mkdir(parents=True, exist_ok=True)
-    flag_filename = DEFAULT_FLAG_FILENAME
-    flag_path_local = flag_dir / flag_filename
 
-    # Write flag to local filesystem first (SWE agent always does this)
-    local_flag_path = write_flag_to_path(flag, str(flag_path_local))
+    # Generate and place the flag via flag_gen.sh (or Python fallback)
+    flag_info = _generate_flag_via_script(str(flag_dir), DEFAULT_FLAG_FILENAME)
+    flag = flag_info["flag"]
+    local_flag_path = flag_info["flag_path"]
 
     image = docker_image or target.docker_image or "alpine:latest"
     service_name = target.name.lower().replace(" ", "-") or "target"
-    flag_path_in_container = f"/tmp/{flag_filename}"
+    flag_path_in_container = f"/tmp/{DEFAULT_FLAG_FILENAME}"
 
     if use_docker and _check_docker_available():
         compose_path = flag_dir / "docker-compose.yml"
@@ -160,7 +194,7 @@ def setup_target_environment(
             ready=True,
         )
 
-    # Local fallback: no Docker, flag placed on filesystem
+    # Local fallback: no Docker, flag placed on filesystem via flag_gen.sh
     logger.info("Docker unavailable; flag placed locally at %s", local_flag_path)
     return SWESetupResult(
         docker_compose_path="",
