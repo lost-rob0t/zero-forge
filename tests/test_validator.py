@@ -10,9 +10,11 @@ from unittest.mock import patch
 
 import pytest
 
+from zero_forge.examples import default_examples_root
 from zero_forge.tools.validator import (
     DefaultRubyRunner,
     ValidatorRuntimeUnavailable,
+    require_node_runtime,
     require_ruby_runtime,
     validate_metasploit,
     validate_zap_active_scan,
@@ -302,7 +304,7 @@ def test_empty_content():
 
 @pytest.mark.parametrize(
     "path",
-    sorted(Path("llm_examples/zap/active").glob("*.js")),
+    sorted((default_examples_root() / "zap" / "active").glob("*.js")),
 )
 def test_zap_active_examples_validate(path):
     result = validate_zap_active_scan(path.read_text(encoding="utf-8"))
@@ -313,13 +315,55 @@ def test_zap_active_examples_validate(path):
 
 @pytest.mark.parametrize(
     "path",
-    sorted(Path("llm_examples/zap/passive").glob("*.js")),
+    sorted((default_examples_root() / "zap" / "passive").glob("*.js")),
 )
 def test_zap_passive_examples_validate(path):
     result = validate_zap_passive_scan(path.read_text(encoding="utf-8"))
 
     assert result["is_valid"] is True
     assert result["errors"] == []
+
+
+def test_zap_active_rejects_invalid_javascript_syntax():
+    content = (
+        default_examples_root() / "zap" / "active" / "reflected_input.js"
+    ).read_text(encoding="utf-8")
+    content = content.replace(
+        'const attack = "zf-reflection-8f7d3c";',
+        'const broken = ([)];\n  const attack = "zf-reflection-8f7d3c";',
+    )
+
+    result = validate_zap_active_scan(content)
+
+    assert result["is_valid"] is False
+    assert any("JavaScript syntax error" in error for error in result["errors"])
+
+
+def test_zap_active_rejects_invalid_metadata_yaml():
+    content = (
+        default_examples_root() / "zap" / "active" / "reflected_input.js"
+    ).read_text(encoding="utf-8")
+    content = content.replace(
+        "references:\n  - https://www.zaproxy.org/docs/desktop/addons/script-console/",
+        "references: [unterminated",
+    )
+
+    result = validate_zap_active_scan(content)
+
+    assert result["is_valid"] is False
+    assert any("Invalid ZAP metadata YAML" in error for error in result["errors"])
+
+
+def test_zap_active_requires_category_metadata():
+    content = (
+        default_examples_root() / "zap" / "active" / "reflected_input.js"
+    ).read_text(encoding="utf-8")
+    content = content.replace("category: injection\n", "")
+
+    result = validate_zap_active_scan(content)
+
+    assert result["is_valid"] is False
+    assert "Missing required ZAP metadata key: 'category'" in result["errors"]
 
 
 def test_zap_active_requires_detection_flow():
@@ -378,6 +422,31 @@ def test_zap_metadata_inside_comment_does_not_satisfy_contract():
 
     assert result["is_valid"] is False
     assert "Missing ScanRuleMetadata YAML template literal" in result["errors"]
+
+
+def test_node_preflight_returns_resolved_executable():
+    with patch("zero_forge.tools.validator.shutil.which", return_value="/usr/bin/node"):
+        assert require_node_runtime() == "/usr/bin/node"
+
+
+def test_node_preflight_missing_is_actionable():
+    with (
+        patch("zero_forge.tools.validator.shutil.which", return_value=None),
+        pytest.raises(ValidatorRuntimeUnavailable, match="install Node.js"),
+    ):
+        require_node_runtime()
+
+
+def test_zap_validation_fails_closed_without_node():
+    content = (
+        default_examples_root() / "zap" / "passive" / "missing_csp.js"
+    ).read_text(encoding="utf-8")
+    with patch("zero_forge.tools.validator.shutil.which", return_value=None):
+        result = validate_zap_passive_scan(content)
+
+    assert result["is_valid"] is False
+    assert result["runtime_error"] is True
+    assert any("Node.js is required" in error for error in result["errors"])
 
 
 def test_ruby_preflight_returns_resolved_executable():
