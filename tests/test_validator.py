@@ -826,7 +826,6 @@ def test_adversarial_sibling_initialize_not_counted():
 
 def test_valid_module_still_passes_scoped_walk():
     """A genuinely valid module must still pass after the scoping fix."""
-    runner = FakeRubyRunner()
-    result = validate_metasploit(VALID_MODULE, ruby_runner=runner)
+    result = validate_metasploit(VALID_MODULE)
     assert result["is_valid"] is True
     assert len(result["errors"]) == 0
