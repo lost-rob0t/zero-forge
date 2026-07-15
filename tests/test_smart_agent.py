@@ -77,7 +77,7 @@ def test_active_prompt_includes_only_active_examples():
     assert "function scan(ps, msg, src)" not in prompt
 
 
-def test_passive_repair_prompt_reinforces_no_network_rule():
+def test_passive_repair_prompt_includes_contract_and_errors():
     artifact = Artifact(
         artifact_type=ArtifactType.ZAP_PASSIVE,
         content="function scan(ps, msg, src) {}",
@@ -90,9 +90,51 @@ def test_passive_repair_prompt_reinforces_no_network_rule():
 
     prompt = _build_repair_prompt(artifact, validation)
 
-    assert "Never call sendAndReceive" in prompt
     assert "function scan(ps, msg, src)" in prompt
     assert "Passive rules must not send requests" in prompt
+    assert "ps.newAlert" in prompt
+    assert "Never call sendAndReceive" not in prompt
+
+
+def test_zap_active_prompt_has_no_prohibition_language():
+    """ZAP_ACTIVE prompts must not contain restriction language (issue #96)."""
+    from zero_forge.agents.smart_agent import _PROFILES
+
+    profile = _PROFILES[ArtifactType.ZAP_ACTIVE]
+    text = profile.system_instructions + profile.contract
+    assert "must never" not in text.lower()
+    assert "never call" not in text.lower()
+    assert "must not" not in text.lower()
+    assert "clone" in text.lower()
+    assert "sendandreceive" in text.lower()
+    assert "inspect" in text.lower()
+    assert "alert" in text.lower()
+
+
+def test_zap_passive_prompt_has_no_prohibition_language():
+    """ZAP_PASSIVE prompts must not contain restriction language (issue #96)."""
+    from zero_forge.agents.smart_agent import _PROFILES
+
+    profile = _PROFILES[ArtifactType.ZAP_PASSIVE]
+    text = profile.system_instructions + profile.contract
+    assert "must never" not in text.lower()
+    assert "never call" not in text.lower()
+    assert "must not" not in text.lower()
+    assert "inspect" in text.lower()
+    assert "alert" in text.lower()
+
+
+def test_zap_active_prompt_describes_lifecycle():
+    """ZAP_ACTIVE prompt must describe the full clone→probe→inspect→alert lifecycle."""
+    from zero_forge.agents.smart_agent import _PROFILES
+
+    profile = _PROFILES[ArtifactType.ZAP_ACTIVE]
+    text = profile.system_instructions.lower() + profile.contract.lower()
+    assert "clone" in text
+    assert "probe" in text
+    assert "inspect" in text
+    assert "alert" in text
+    assert "baseline" in text
 
 
 def test_missing_credentials_fail_closed(monkeypatch):
