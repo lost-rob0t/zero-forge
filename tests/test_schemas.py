@@ -44,6 +44,19 @@ def test_vulnerability_input_full():
     assert vi.source_path == "/tmp/src"
 
 
+def test_vulnerability_input_without_cve():
+    vi = VulnerabilityInput()
+    assert vi.cve_id == ""
+    assert vi.poc_text == ""
+    assert vi.source_path is None
+
+
+def test_vulnerability_input_source_only():
+    vi = VulnerabilityInput(source_path="/tmp/dvwa")
+    assert vi.cve_id == ""
+    assert vi.source_path == "/tmp/dvwa"
+
+
 def test_artifact_creation():
     art = Artifact(
         artifact_type=ArtifactType.METASPLOIT,

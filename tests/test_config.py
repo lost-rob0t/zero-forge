@@ -151,6 +151,20 @@ def test_env_enables_explicit_stub_mode(clean_env, monkeypatch):
     assert load_config().llm.stub_mode is True
 
 
+def test_logging_defaults(clean_env):
+    settings = load_config()
+    assert settings.logging.level == "INFO"
+    assert settings.logging.model_io_level == "TRACE"
+
+
+def test_logging_env_overrides(clean_env, monkeypatch):
+    monkeypatch.setenv("ZERO_FORGE_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("ZERO_FORGE_LOG_MODEL_IO_LEVEL", "WARNING")
+    settings = load_config()
+    assert settings.logging.level == "DEBUG"
+    assert settings.logging.model_io_level == "WARNING"
+
+
 def test_env_api_keys(clean_env, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-123")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai-456")

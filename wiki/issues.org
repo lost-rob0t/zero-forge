@@ -4,8 +4,8 @@
 * Tracker Metadata
 :PROPERTIES:
 :REPOSITORY: lost-rob0t/zero-forge
-:LAST_SYNC: 2026-07-15T00:11:24Z
-:DOCUMENTED_MASTER: 452556a10faa03a8c6b15d0e290dbaa71af7f1c6
+:LAST_SYNC: 2026-07-15T01:14:43Z
+:DOCUMENTED_MASTER: 0a730f0135679f50dfa3a3746e51d2efdb98e964
 :END:
 
 * Open Issues
@@ -21,7 +21,7 @@
 :UPDATED_AT: 2026-07-14T22:36:28Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/2
 :END:
-Latest direction: explicit stub repair must retain stub metadata, fail immediately, skip validation and saving, and gain direct/workflow regression coverage.
+Latest direction: **workflow-reviewer:** Reopened after auditing `master` commit [`0336875`](https://github.com/lost-rob0t/zero-forge/commit/0336875f2f9cc87e01fd904e4c2184eecf6ba8e8). PR #25 fixed initial generation, but the repair path still violates this issue's stub invariant. `repair_artifact()` calls `_call_llm…
 
 ** TODO #3 Validation: regex validator accepts comments-only fake Metasploit modules
 :PROPERTIES:
@@ -34,7 +34,7 @@ Latest direction: explicit stub repair must retain stub metadata, fail immediate
 :UPDATED_AT: 2026-07-14T22:54:49Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/3
 :END:
-Latest direction: fix defensively against nonsensical model output despite earlier uncertainty about whether comment-only input is technically valid.
+Latest direction: hmm maybe just incase of llm nonsense we should maybe fix this.
 
 ** TODO #4 Input: normalize and validate CVE IDs before workflow execution
 :PROPERTIES:
@@ -42,11 +42,11 @@ Latest direction: fix defensively against nonsensical model output despite earli
 :STATE: open
 :LABELS: area:workflow, status:ready, priority:P2, type:bug
 :ASSIGNEES: none
-:LINKED_WORK: implementation tested locally; publication blocked by #12
+:LINKED_WORK: none
 :UPDATED_AT: 2026-07-14T23:01:46Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/4
 :END:
-Latest direction: targeted implementation passed; retry publication after the Ruby preflight blocker is resolved.
+Latest direction: Hey GPT-5 here. The hourly issue-improvement workflow selected this issue for its test run and implemented the fix in an isolated checkout, but the repository gate blocked publication. Validation results: - `pytest tests/test_schemas.py tests/test_cve_lookup.py tests/test_workflow.py -q`: **25 pass…
 
 ** TODO #7 Output: make artifact writes atomic, race-safe, and non-clobbering
 :PROPERTIES:
@@ -58,7 +58,7 @@ Latest direction: targeted implementation passed; retry publication after the Ru
 :UPDATED_AT: 2026-07-14T22:36:31Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/7
 :END:
-Latest direction: issue body is current; secure atomic publication and concurrency tests are required.
+Latest direction: ## Problem `_safe_resolve()` checks a candidate and then `Path.write_text()` opens it later. Another process can replace the path with a symlink between those operations (TOCTOU). Existing regular files are also silently overwritten, and artifact/sidecar writes are not atomic as a pair. ## Impact I…
 
 ** TODO #9 Tools: search_code changes semantics and result schema depending on ripgrep
 :PROPERTIES:
@@ -70,7 +70,7 @@ Latest direction: issue body is current; secure atomic publication and concurren
 :UPDATED_AT: 2026-07-14T22:36:37Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/9
 :END:
-Latest direction: blocked; normalize literal/regex semantics and result schema when unblocked.
+Latest direction: ## Problem `search_code()` has two incompatible implementations: - With ripgrep, `pattern` is treated as regex and results are `{"match": ...}`; `-C 2` context lines also count as results. - Without ripgrep (or after a ripgrep error), the pattern is escaped and treated literally, with structured `p…
 
 ** TODO #10 Testing: add reproducible test dependencies and CI
 :PROPERTIES:
@@ -78,11 +78,11 @@ Latest direction: blocked; normalize literal/regex semantics and result schema w
 :STATE: open
 :LABELS: priority:P2, status:needs-verification, type:ci, area:tooling
 :ASSIGNEES: none
-:LINKED_WORK: CI exists on master; remaining acceptance needs verification
+:LINKED_WORK: none
 :UPDATED_AT: 2026-07-14T22:36:35Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/10
 :END:
-Latest direction: verify current dev dependency, CI, Ruby, skip visibility, and branch protection coverage.
+Latest direction: ## Problem The README instructs users to run `pytest`, but `pyproject.toml` does not declare pytest or a development/test extra, and the repository has no CI workflow. A normal project install does not provide a reproducible way to run the stated test suite or gate branch changes. ## Acceptance cri…
 
 ** TODO #11 ZF-004: scope Ripper findings to the MetasploitModule class
 :PROPERTIES:
@@ -90,23 +90,11 @@ Latest direction: verify current dev dependency, CI, Ruby, skip visibility, and 
 :STATE: open
 :LABELS: priority:P0, type:security, status:ready, area:validation
 :ASSIGNEES: none
-:LINKED_WORK: fix/zf-004-ruby-validation
+:LINKED_WORK: none
 :UPDATED_AT: 2026-07-14T22:36:34Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/11
 :END:
-Latest direction: issue body is current; scope methods and metadata to the exact module class.
-
-** TODO #12 ZF-004: declare and preflight the Ruby runtime requirement
-:PROPERTIES:
-:ID: issue-12
-:STATE: open
-:LABELS: type:reliability, status:ready, priority:P1, area:validation
-:ASSIGNEES: none
-:LINKED_WORK: draft PR #44
-:UPDATED_AT: 2026-07-14T23:11:03Z
-:URL: https://github.com/lost-rob0t/zero-forge/issues/12
-:END:
-Latest direction: CI/documentation were covered by #38; draft PR #44 handles startup preflight and prevents validator-runtime repair retries.
+Latest direction: ## Branch `fix/zf-004-ruby-validation` ## Problem The embedded Ripper walker stores global booleans and metadata keys while walking the entire syntax tree. It confirms that a `MetasploitModule` class exists, but `initialize`, `exploit`, and metadata can come from unrelated classes or top-level hash…
 
 ** TODO #13 ZF-005: preserve relative paths in source context prompts
 :PROPERTIES:
@@ -114,11 +102,11 @@ Latest direction: CI/documentation were covered by #38; draft PR #44 handles sta
 :STATE: open
 :LABELS: area:source, status:ready, priority:P2, type:bug
 :ASSIGNEES: none
-:LINKED_WORK: feature/zf-005-source-context-capture
+:LINKED_WORK: none
 :UPDATED_AT: 2026-07-14T22:36:40Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/13
 :END:
-Latest direction: issue body is current; use normalized relative paths without exposing host paths.
+Latest direction: ## Branch `feature/zf-005-source-context-capture` ## Problem `SourceFile` retains `path`, but `_build_context_prompt()` now labels files only with `sf.filename`. Repositories commonly contain duplicate basenames such as `routes.py`, `config.yml`, or `README.md` in different directories. The model c…
 
 ** TODO #14 ZF-005: bound source scanning before reading repository contents
 :PROPERTIES:
@@ -126,11 +114,11 @@ Latest direction: issue body is current; use normalized relative paths without e
 :STATE: open
 :LABELS: area:source, status:ready, type:bug, priority:P1
 :ASSIGNEES: none
-:LINKED_WORK: feature/zf-005-source-context-capture
+:LINKED_WORK: none
 :UPDATED_AT: 2026-07-14T22:36:41Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/14
 :END:
-Latest direction: issue body is current; bound candidate traversal, reads, bytes, time, and returned files separately.
+Latest direction: ## Branch `feature/zf-005-source-context-capture` ## Problem The branch changed `read_source_files()` to read every eligible file into memory, sort the resulting records, and only then apply `results[:max_files]`. In a large repository, `max_files=20` no longer bounds file reads, memory use, or lat…
 
 ** TODO #15 Research: CVE lookup failures are swallowed and treated as valid empty context
 :PROPERTIES:
@@ -142,7 +130,7 @@ Latest direction: issue body is current; bound candidate traversal, reads, bytes
 :UPDATED_AT: 2026-07-14T22:36:43Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/15
 :END:
-Latest direction: issue body is current; distinguish success, not-found, retryable failure, and permanent failure.
+Latest direction: ## Problem `cve_lookup()` catches every exception and returns the same empty result used for “CVE not found.” `ToolAgent.collect_context()` therefore cannot distinguish network failure, timeout, invalid JSON, API rejection/rate limiting, or a genuine empty response. Generation proceeds without indi…
 
 ** TODO #21 CI: enforce Ruff formatting instead of lint-only green builds
 :PROPERTIES:
@@ -154,7 +142,7 @@ Latest direction: issue body is current; distinguish success, not-found, retryab
 :UPDATED_AT: 2026-07-14T22:36:45Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/21
 :END:
-Latest direction: issue body is current; formatting-only change and a separate CI formatter gate.
+Latest direction: ## Finding PR #18 / commit [`674439a`](https://github.com/lost-rob0t/zero-forge/commit/674439a081a9d43d636345813292105206af5b8c) hand-wrapped long lines with malformed continuation indentation in `tool_agent.py`, `workflow.py`, `config.py`, `source_inspect.py`, and `cli.py`. `ruff check .` still pa…
 
 ** TODO #26 [Artifact] Binary-pwn workflow: reproduce and improve PwnGPT for ELF exploit generation
 :PROPERTIES:
@@ -162,11 +150,11 @@ Latest direction: issue body is current; formatting-only change and a separate C
 :STATE: open
 :LABELS: artifact-request, binary-pwn, research, priority:P3, type:epic, area:artifact, status:roadmap
 :ASSIGNEES: none
-:LINKED_WORK: docs/ideas references in issue body
+:LINKED_WORK: none
 :UPDATED_AT: 2026-07-14T22:36:46Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/26
 :END:
-Latest direction: roadmap epic; require isolated execution, explicit success oracle, and repeatability.
+Latest direction: **Authored by Agent Zero** — autonomous AI agent (Agent Zero framework) --- ## Artifact type Binary exploitation workflow ## Vulnerability identifier N/A — research / capability request (not CVE-specific). Benchmark targets are known CTF binaries. ## Primary sources - **PwnGPT: A Large Language Mod…
 
 ** TODO #28 Vulnerability discovery: hypothesis–experiment–evidence workflow
 :PROPERTIES:
@@ -174,11 +162,11 @@ Latest direction: roadmap epic; require isolated execution, explicit success ora
 :STATE: open
 :LABELS: priority:P3, type:epic, status:roadmap, area:discovery
 :ASSIGNEES: none
-:LINKED_WORK: four-phase RESEARCH/PLAN/EXPLOIT/VERIFY proposal
+:LINKED_WORK: none
 :UPDATED_AT: 2026-07-14T23:57:20Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/28
 :END:
-Latest direction: add an SWE-agent-owned Docker setup capability; VERIFY should use a deterministic Prolog or typed-IR oracle over captured evidence.
+Latest direction: So we need a SWE agent to setup dockers
 
 ** TODO #34 Design: public Python/Context APIs and scriptable project harnesses
 :PROPERTIES:
@@ -190,7 +178,7 @@ Latest direction: add an SWE-agent-owned Docker setup capability; VERIFY should 
 :UPDATED_AT: 2026-07-14T22:59:13Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/34
 :END:
-Latest direction: the future agent must inspect patch diffs so a patched CVE can be localized quickly.
+Latest direction: Also the agent must be able to inspect diffs so when a CVE gets patched we can jump to the needle in the haystack and that that free pwn.
 
 ** TODO #35 Feature: add a typed internal planning phase before artifact generation
 :PROPERTIES:
@@ -202,34 +190,115 @@ Latest direction: the future agent must inspect patch diffs so a patched CVE can
 :UPDATED_AT: 2026-07-14T22:37:45Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/35
 :END:
-Latest direction: planning remains a Smart-Agent phase; optional bounded sub-agents may be added later through typed fan-out/fan-in.
+Latest direction: We do **not** need a separate Planner agent for the first implementation. Planning should be a **role/phase of the Smart Agent**, represented by the typed `ArtifactPlan` and controlled by LangGraph. That preserves the current two-agent boundary: - **Smart Agent:** reasons, creates/revises the plan,…
 
-** TODO #45 Maintenance: bootstrap docs, Org tracker, wiki, and steward scripts
+** TODO #54 Implement artifact-aware examples and ZAP detection generation
+:PROPERTIES:
+:ID: issue-54
+:STATE: open
+:LABELS: none
+:ASSIGNEES: none
+:LINKED_WORK: draft PR #60
+:UPDATED_AT: 2026-07-15T01:02:37Z
+:URL: https://github.com/lost-rob0t/zero-forge/issues/54
+:END:
+Latest direction: Hey Codex here. The current implementation centralizes artifact-specific system instructions, structural contracts, reference examples, generation prompts, and repair prompts behind managed artifact profiles. I split the future operator-guided/chat layer into #59 so auto mode and interactive checkp…
+
+** TODO #59 Design managed prompts and operator-guided generation mode
+:PROPERTIES:
+:ID: issue-59
+:STATE: open
+:LABELS: none
+:ASSIGNEES: none
+:LINKED_WORK: none
+:UPDATED_AT: 2026-07-15T01:02:36Z
+:URL: https://github.com/lost-rob0t/zero-forge/issues/59
+:END:
+Latest direction: Hey Codex here. ## Context Issue #54 introduces centralized artifact profiles, structural contracts, bounded examples, and repair prompts. A later interface should let an operator guide the Smart Agent without weakening the existing autonomous workflow. ## Scope - Define a versioned prompt/profile …
+
+* Recently Closed Issues
+
+** DONE #12 ZF-004: declare and preflight the Ruby runtime requirement
+:PROPERTIES:
+:ID: issue-12
+:STATE: closed
+:STATE_REASON: completed
+:LABELS: type:reliability, status:ready, priority:P1, area:validation
+:ASSIGNEES: none
+:LINKED_WORK: merged PR #44
+:UPDATED_AT: 2026-07-15T00:48:10Z
+:URL: https://github.com/lost-rob0t/zero-forge/issues/12
+:END:
+Latest direction: Hey GPT-5 here. Draft PR #38 pins Ruby 3.3.8, provisions it explicitly in both GitHub test-matrix jobs, and documents the validation requirement. Current PR-head CI is green: `lint`, `type-check`, `test (3.12)`, and `test (3.13)` all passed; the Ruby setup step succeeded in both test jobs. This cov…
+
+** DONE #45 Maintenance: bootstrap docs, Org tracker, wiki, and steward scripts
 :PROPERTIES:
 :ID: issue-45
-:STATE: open
+:STATE: closed
+:STATE_REASON: completed
 :LABELS: priority:P2, area:tooling
 :ASSIGNEES: none
-:LINKED_WORK: codex/45-project-steward-a1
-:UPDATED_AT: 2026-07-15T00:11:24Z
+:LINKED_WORK: merged PR #46; retired codex branch
+:UPDATED_AT: 2026-07-15T00:28:12Z
 :URL: https://github.com/lost-rob0t/zero-forge/issues/45
 :END:
-Latest direction: bootstrap docs, wiki source, Org tracking, tested helpers, and post-maintenance research.
+Latest direction: Hey Codex here. First-run blockers after publishing draft PR #46: 1. **Packaging:** all four CI jobs failed during `pip install -e ".[dev]"`. Setuptools reports `Multiple top-level packages discovered in a flat-layout: ['wiki', 'research', 'zero_forge', 'dev_scripts']`. Local source-tree tests pass…
+
+** DONE #47 Security: Tool Agent can replace workflow-owned arguments before execution
+:PROPERTIES:
+:ID: issue-47
+:STATE: closed
+:STATE_REASON: completed
+:LABELS: priority:P0, type:security, status:in-pr, area:workflow
+:ASSIGNEES: none
+:LINKED_WORK: merged PR #52
+:UPDATED_AT: 2026-07-15T00:35:23Z
+:URL: https://github.com/lost-rob0t/zero-forge/issues/47
+:END:
+Latest direction: Hey Codex here. ## Problem Commit [`6353803`](https://github.com/lost-rob0t/zero-forge/commit/63538037d608a8210bc64dbc1c437ed35bbef802) routed built-in context collection and validation through the model-backed Tool Agent. In current `master` at [`452556a`](https://github.com/lost-rob0t/zero-forge/…
+
+** DONE #49 Add llm_examples directory with per-artifact-type subdirectories
+:PROPERTIES:
+:ID: issue-49
+:STATE: closed
+:STATE_REASON: completed
+:LABELS: none
+:ASSIGNEES: none
+:LINKED_WORK: merged PR #50
+:UPDATED_AT: 2026-07-15T00:27:12Z
+:URL: https://github.com/lost-rob0t/zero-forge/issues/49
+:END:
+Latest direction: Hey glm-5.2 here. ## Summary Add a new top-level llm_examples/ directory to hold LLM example artifacts organized by artifact type. ## Proposed Structure llm_examples/ ├── zap/ │ ├── active/ │ └── passive/ ├── metasploit/ └── python/ ## Motivation Provides a canonical location for example artifacts …
 
 * Run Ledger
 
-** RUNNING steward-20260715T000620Z
+** COMPLETED steward-20260715T000620Z
 :PROPERTIES:
-:STARTED_AT: 2026-07-15T00:09:35.834100902Z
-:WINDOW_START: 2026-07-15T00:06:20.574378Z
-:WINDOW_END: 2026-07-15T00:09:35.834100902Z
-:MASTER_SHA: 452556a10faa03a8c6b15d0e290dbaa71af7f1c6
-:OUTCOME: running
+:STARTED_AT: 2026-07-15T00:09:35Z
+:ENDED_AT: 2026-07-15T00:28:12Z
+:WINDOW_START: 2026-07-15T00:06:20Z
+:WINDOW_END: 2026-07-15T00:28:12Z
+:MASTER_SHA: 9ba67cc35f0292cb86e3d54b2a190033b8d7a7bf
+:OUTCOME: completed
 :END:
-- Comments :: no maintainer comments required a reply in the initial window
-- Commits :: documented merge of PR #43 and Tool-selection repair behavior
-- Branch :: codex/45-project-steward-a1
-- Pull request :: pending
-- Validation :: pending
-- Blockers :: GitHub Wiki synchronization capability not yet verified
-- Research :: not started; maintenance publication must complete first
+- Actions :: bootstrapped documentation, wiki source, Org tracker, and steward helpers in merged PR #46
+- Validation :: 167 passed, 12 skipped; Ruff and mypy passed; CI packaging failure was fixed by merged PR #48
+- Blockers :: GitHub Wiki repository was not initialized; research remained deferred
+- Research :: not started
+
+** PARTIAL steward-20260715T010933Z
+:PROPERTIES:
+:STARTED_AT: 2026-07-15T01:09:33Z
+:ENDED_AT: 2026-07-15T01:19:42Z
+:WINDOW_START: 2026-07-15T00:06:20Z
+:WINDOW_END: 2026-07-15T01:14:43Z
+:MASTER_SHA: 0a730f0135679f50dfa3a3746e51d2efdb98e964
+:OUTCOME: partial
+:END:
+- Comments :: no duplicate reply was needed; issue #54 prompt-management direction was already acknowledged and split into #59
+- Commits :: inspected changes since 452556a; documented Tool argument locking, Ruby preflight, Dependabot, and CI action upgrades
+- Branch :: docs; preserved concurrent history and advanced only by non-force fast-forward
+- Pull request :: draft PR #62
+- Validation :: local 174 passed, 12 skipped; Ruff and mypy passed; GitHub lint, type-check, test (3.12), and test (3.13) passed on 8f8d261
+- Blockers :: GitHub Wiki pull/push unavailable because the runner lacks authenticated Git transport for the separate wiki repository
+- Research :: not started because the wiki maintenance phase remains blocked

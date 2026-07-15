@@ -2,10 +2,12 @@
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
+import zero_forge.output as output_module
 from zero_forge.output import ArtifactPathError, save_artifact
 from zero_forge.schemas import Artifact, ArtifactType
 
@@ -94,6 +96,17 @@ def test_save_artifact_rejects_empty_filename(tmp_path):
     # Empty filename triggers default name generation, which is valid.
     path = save_artifact(art, output_dir=tmp_path)
     assert Path(path).exists()
+
+
+def test_save_artifact_allows_empty_cve_id(tmp_path):
+    """An empty cve_id in metadata should not trigger validation failure (issue #68)."""
+    art = _make_artifact("source_only.rb", cve_id="")
+    path = save_artifact(art, output_dir=tmp_path)
+    assert Path(path).exists()
+
+    meta_path = Path(path).with_suffix(".rb.meta.json")
+    meta = json.loads(meta_path.read_text())
+    assert meta["cve_id"] == ""
 
 
 def test_save_artifact_rejects_cve_id_with_traversal(tmp_path):
@@ -215,3 +228,90 @@ def test_save_artifact_rejects_double_dot_filename(tmp_path):
     art = _make_artifact("..")
     with pytest.raises(ArtifactPathError, match="parent directory|basename"):
         save_artifact(art, output_dir=tmp_path)
+
+
+def test_save_artifact_never_overwrites_existing_pair(tmp_path):
+    first = _make_artifact("collision.rb")
+    first.content = "first"
+    first_path = Path(save_artifact(first, output_dir=tmp_path))
+    first_meta = first_path.with_suffix(".rb.meta.json").read_text()
+
+    second = _make_artifact("collision.rb")
+    second.content = "second"
+    with pytest.raises(ArtifactPathError, match="refusing to overwrite"):
+        save_artifact(second, output_dir=tmp_path)
+
+    assert first_path.read_text() == "first"
+    assert first_path.with_suffix(".rb.meta.json").read_text() == first_meta
+
+
+def test_sidecar_collision_leaves_no_artifact_placeholder(tmp_path):
+    sidecar = tmp_path / "collision.rb.meta.json"
+    sidecar.write_text("existing", encoding="utf-8")
+
+    with pytest.raises(ArtifactPathError, match="refusing to overwrite"):
+        save_artifact(_make_artifact("collision.rb"), output_dir=tmp_path)
+
+    assert not (tmp_path / "collision.rb").exists()
+    assert sidecar.read_text() == "existing"
+
+
+def test_partial_publish_failure_cleans_entire_pair(tmp_path, monkeypatch):
+    real_replace = os.replace
+    replacements = 0
+
+    def fail_second_replace(source, destination):
+        nonlocal replacements
+        replacements += 1
+        if replacements == 2:
+            raise OSError("simulated artifact publish failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(output_module.os, "replace", fail_second_replace)
+
+    with pytest.raises(ArtifactPathError, match="simulated artifact publish failure"):
+        save_artifact(_make_artifact("partial.rb"), output_dir=tmp_path)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_concurrent_writers_publish_exactly_one_complete_pair(tmp_path):
+    def publish(content: str):
+        artifact = _make_artifact("concurrent.rb")
+        artifact.content = content
+        try:
+            return save_artifact(artifact, output_dir=tmp_path)
+        except ArtifactPathError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(publish, ["first", "second"]))
+
+    assert sum(result is not None for result in results) == 1
+    artifact_path = tmp_path / "concurrent.rb"
+    metadata_path = tmp_path / "concurrent.rb.meta.json"
+    assert artifact_path.read_text() in {"first", "second"}
+    assert json.loads(metadata_path.read_text())["filename"] == artifact_path.name
+    assert not list(tmp_path.glob(".zeroforge-*.tmp"))
+
+
+def test_symlink_inserted_after_path_check_is_not_followed(tmp_path, monkeypatch):
+    outside = tmp_path.parent / "race-target.txt"
+    outside.write_text("unchanged", encoding="utf-8")
+    real_reserve = output_module._reserve_destination
+    inserted = False
+
+    def insert_symlink(path: Path) -> None:
+        nonlocal inserted
+        if not inserted and path.name == "race.rb":
+            path.symlink_to(outside)
+            inserted = True
+        real_reserve(path)
+
+    monkeypatch.setattr(output_module, "_reserve_destination", insert_symlink)
+
+    with pytest.raises(ArtifactPathError, match="refusing to overwrite"):
+        save_artifact(_make_artifact("race.rb"), output_dir=tmp_path)
+
+    assert outside.read_text() == "unchanged"
+    assert (tmp_path / "race.rb").is_symlink()

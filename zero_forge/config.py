@@ -58,6 +58,24 @@ class LLMConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LoggingConfig(BaseModel):
+    """Logging configuration for the ZeroForge hierarchy."""
+
+    level: str = Field(
+        default="INFO",
+        description="Minimum log level for the root zero_forge logger",
+    )
+    model_io_level: str = Field(
+        default="TRACE",
+        description=(
+            "Minimum log level for model I/O (prompts and responses). "
+            "Set to TRACE to capture raw LLM input/output."
+        ),
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class WorkflowConfig(BaseModel):
     """Workflow execution settings."""
 
@@ -83,6 +101,7 @@ class Settings(BaseModel):
 
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     workflow: WorkflowConfig = Field(default_factory=WorkflowConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
@@ -105,6 +124,8 @@ _ENV_MAP: dict[str, str] = {
     "ZERO_FORGE_TOOL_MAX_TOKENS": "models.tool.max_tokens",
     "ZERO_FORGE_TOOL_BASE_URL": "models.tool.base_url",
     "ZERO_FORGE_STUB_MODE": "llm.stub_mode",
+    "ZERO_FORGE_LOG_LEVEL": "logging.level",
+    "ZERO_FORGE_LOG_MODEL_IO_LEVEL": "logging.model_io_level",
     "ZERO_FORGE_OUTPUT_DIR": "output.dir",
     "ZERO_FORGE_MAX_REPAIR_ATTEMPTS": "workflow.max_repair_attempts",
     "ZERO_FORGE_UNSAFE_SOURCE": "workflow.unsafe_source_collection",

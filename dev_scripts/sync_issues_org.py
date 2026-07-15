@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +31,12 @@ def _gh_json(*arguments: str) -> Any:
     return json.loads(completed.stdout)
 
 
-def collect_issues(repository: str) -> list[dict[str, Any]]:
+def collect_issues(
+    repository: str,
+    *,
+    recently_closed_days: int = 7,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
     repository = _validate_repository(repository)
     issues = _gh_json(
         "issue",
@@ -38,12 +44,25 @@ def collect_issues(repository: str) -> list[dict[str, Any]]:
         "--repo",
         repository,
         "--state",
-        "open",
+        "all",
         "--limit",
         "200",
         "--json",
-        "number,title,state,labels,assignees,url,updatedAt",
+        "number,title,state,stateReason,labels,assignees,url,updatedAt,closedAt",
     )
+    if recently_closed_days < 0:
+        raise ValueError("recently_closed_days must be non-negative")
+    current = now or datetime.now(UTC)
+    cutoff = current - timedelta(days=recently_closed_days)
+    issues = [
+        issue
+        for issue in issues
+        if issue["state"] == "OPEN"
+        or (
+            issue.get("closedAt")
+            and datetime.fromisoformat(issue["closedAt"].replace("Z", "+00:00")) >= cutoff
+        )
+    ]
     for issue in issues:
         detail = _gh_json(
             "issue",
@@ -68,15 +87,23 @@ def render_issue(issue: dict[str, Any]) -> str:
     assignees = ", ".join(item["login"] for item in issue.get("assignees", [])) or "none"
     comments = issue.get("comments", [])
     direction = comments[-1]["body"] if comments else issue.get("body", "")
+    state = str(issue["state"]).lower()
+    todo = "TODO" if state == "open" else "DONE"
+    state_reason = issue.get("stateReason") or ""
+    blocked = "status:blocked" in labels
     return "\n".join(
         [
-            f"** TODO #{issue['number']} {_compact(issue['title'], 120)}",
+            f"** {todo} #{issue['number']} {_compact(issue['title'], 120)}",
             ":PROPERTIES:",
             f":ID: issue-{issue['number']}",
-            f":STATE: {str(issue['state']).lower()}",
+            f":STATE: {state}",
+            f":STATE_REASON: {state_reason}",
             f":LABELS: {labels}",
             f":ASSIGNEES: {assignees}",
+            ":LINKED_WORK: none",
+            f":BLOCKERS: {'status:blocked' if blocked else 'none'}",
             f":UPDATED_AT: {issue.get('updatedAt', '')}",
+            f":CLOSED_AT: {issue.get('closedAt') or ''}",
             f":URL: {issue['url']}",
             ":END:",
             f"Latest direction: {_compact(direction) or 'Issue body is current.'}",
@@ -101,7 +128,11 @@ def render_tracker(repository: str, issues: list[dict[str, Any]], existing: str 
             "* Open Issues",
         ]
     )
-    sections = [header, *(render_issue(issue) for issue in issues)]
+    open_issues = [issue for issue in issues if issue["state"] == "OPEN"]
+    closed_issues = [issue for issue in issues if issue["state"] == "CLOSED"]
+    sections = [header, *(render_issue(issue) for issue in open_issues)]
+    if closed_issues:
+        sections.extend(["* Recently Closed", *(render_issue(issue) for issue in closed_issues)])
     sections.append(ledger or f"{RUN_LEDGER_HEADING}\n")
     return "\n\n".join(sections).rstrip() + "\n"
 
@@ -115,6 +146,8 @@ def self_check() -> None:
         "assignees": [],
         "url": "https://example.invalid/7",
         "updatedAt": "2026-01-01T00:00:00Z",
+        "closedAt": None,
+        "stateReason": None,
         "body": "Keep writes atomic.",
         "comments": [],
     }
@@ -122,6 +155,7 @@ def self_check() -> None:
     assert ":ID: issue-7" in rendered
     assert "* Run Ledger" in rendered
     assert _validate_repository("owner/repo") == "owner/repo"
+    assert ":BLOCKERS: none" in rendered
 
 
 def main() -> None:
@@ -129,6 +163,7 @@ def main() -> None:
     parser.add_argument("--repo")
     parser.add_argument("--output", type=Path, default=Path("wiki/issues.org"))
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--recently-closed-days", type=int, default=7)
     parser.add_argument("--self-check", action="store_true")
     args = parser.parse_args()
     if args.self_check:
@@ -137,7 +172,11 @@ def main() -> None:
     if not args.repo:
         parser.error("--repo is required")
     existing = args.output.read_text(encoding="utf-8") if args.output.exists() else ""
-    rendered = render_tracker(args.repo, collect_issues(args.repo), existing)
+    rendered = render_tracker(
+        args.repo,
+        collect_issues(args.repo, recently_closed_days=args.recently_closed_days),
+        existing,
+    )
     if args.dry_run:
         print(rendered, end="")
         return

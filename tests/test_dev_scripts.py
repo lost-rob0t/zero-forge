@@ -14,6 +14,8 @@ def test_issue_tracker_preserves_run_ledger():
         "assignees": [],
         "url": "https://example.invalid/issues/45",
         "updatedAt": "2026-07-15T00:00:00Z",
+        "closedAt": None,
+        "stateReason": None,
         "body": "Create the tracker.",
         "comments": [],
     }
@@ -22,6 +24,26 @@ def test_issue_tracker_preserves_run_ledger():
     assert ":ID: issue-45" in rendered
     assert rendered.count("* Run Ledger") == 1
     assert "** COMPLETED old-run" in rendered
+
+
+def test_issue_tracker_separates_recently_closed_issues():
+    issue = {
+        "number": 12,
+        "title": "Ruby preflight",
+        "state": "CLOSED",
+        "stateReason": "COMPLETED",
+        "labels": [],
+        "assignees": [],
+        "url": "https://example.invalid/issues/12",
+        "updatedAt": "2026-07-15T00:48:10Z",
+        "closedAt": "2026-07-15T00:48:10Z",
+        "body": "Preflight Ruby.",
+        "comments": [],
+    }
+    rendered = render_tracker("owner/repo", [issue])
+    assert "* Recently Closed" in rendered
+    assert "** DONE #12 Ruby preflight" in rendered
+    assert ":STATE_REASON: COMPLETED" in rendered
 
 
 def test_run_entry_is_append_only():

@@ -25,7 +25,10 @@ class ArtifactType(StrEnum):
 class VulnerabilityInput(BaseModel):
     """User-supplied vulnerability context for the harness."""
 
-    cve_id: str = Field(..., description="CVE identifier, e.g. CVE-2021-44228")
+    cve_id: str = Field(
+        default="",
+        description="CVE identifier, e.g. CVE-2021-44228. Optional for source-only analysis.",
+    )
     artifact_type: ArtifactType = Field(
         default=ArtifactType.METASPLOIT,
         description="Security artifact format to generate",
