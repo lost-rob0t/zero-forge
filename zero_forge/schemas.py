@@ -5,7 +5,13 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class StrictSchema(BaseModel):
+    """Base schema that rejects undeclared fields."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ArtifactType(StrEnum):
@@ -24,7 +30,6 @@ class VulnerabilityInput(BaseModel):
     writeup_text: str = Field(default="", description="Vulnerability write-up or analysis")
     source_path: str | None = Field(default=None, description="Path to vulnerable source code")
     patch_diff: str = Field(default="", description="Patch or git diff as text")
-
 
 class SourceFile(BaseModel):
     """A single source file inspected by the harness."""
@@ -68,11 +73,38 @@ class ValidationResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class ToolRequest(StrictSchema):
+    """Bounded request for the Tool Agent model."""
+
+    objective: str = Field(min_length=1)
+    allowed_tools: list[str] = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolCall(StrictSchema):
+    """Strict tool selection returned by the Tool Agent model."""
+
+    name: str = Field(min_length=1)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolResult(StrictSchema):
+    """Normalized result from deterministic tool execution."""
+
+    name: str
+    output: Any = None
+    error: str = ""
+    role: str = "tool"
+    provider: str = ""
+    model: str = ""
+
+
 class WorkflowError(BaseModel):
     """Structured failure context retained in workflow state."""
 
     code: str
     message: str
+    role: str = ""
     provider: str = ""
     model: str = ""
     retryable: bool = False

@@ -8,14 +8,37 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from .agents.smart_agent import LLMCallError, generate_artifact, repair_artifact
-from .agents.tool_agent import ToolAgent
+from .agents.tool_agent import ToolAgent, ToolAgentError
 from .schemas import WorkflowError, WorkflowState
 
 
 def collect_context_node(state: WorkflowState) -> dict[str, Any]:
     """Node: collect vulnerability context using the Tool Agent."""
     agent = ToolAgent()
-    ctx = agent.collect_context(state.vuln_input)
+    try:
+        ctx = agent.collect_context(state.vuln_input)
+    except LLMCallError as exc:
+        return {
+            "error": str(exc),
+            "failure": exc.as_workflow_error(),
+            "status": "failed",
+        }
+    except ToolAgentError as exc:
+        from .config import get_settings
+
+        config = get_settings().models.tool
+        message = f"Tool Agent rejected a call: {exc}"
+        return {
+            "error": message,
+            "failure": WorkflowError(
+                code="tool_agent_error",
+                message=message,
+                role="tool",
+                provider=config.provider,
+                model=config.model,
+            ),
+            "status": "failed",
+        }
     return {"context": ctx, "status": "context_collected"}
 
 
@@ -52,7 +75,33 @@ def validate_artifact_node(state: WorkflowState) -> dict[str, Any]:
     if state.artifact is None:
         return {"error": "No artifact to validate", "status": "error"}
     agent = ToolAgent()
-    validation = agent.validate_artifact(state.artifact.content, state.artifact.artifact_type.value)
+    try:
+        validation = agent.validate_artifact(
+            state.artifact.content,
+            state.artifact.artifact_type.value,
+        )
+    except LLMCallError as exc:
+        return {
+            "error": str(exc),
+            "failure": exc.as_workflow_error(),
+            "status": "failed",
+        }
+    except ToolAgentError as exc:
+        from .config import get_settings
+
+        config = get_settings().models.tool
+        message = f"Tool Agent rejected a call: {exc}"
+        return {
+            "error": message,
+            "failure": WorkflowError(
+                code="tool_agent_error",
+                message=message,
+                role="tool",
+                provider=config.provider,
+                model=config.model,
+            ),
+            "status": "failed",
+        }
     return {"validation": validation, "status": "validated"}
 
 
@@ -123,6 +172,13 @@ def should_validate_or_fail(state: WorkflowState) -> str:
     return "validate"
 
 
+def should_generate_or_fail(state: WorkflowState) -> str:
+    """Route context collection failures directly to the terminal failure node."""
+    if state.failure is not None or state.status != "context_collected":
+        return "fail"
+    return "generate"
+
+
 def should_repair_or_finish(state: WorkflowState) -> str:
     """Conditional edge: decide whether to repair, save, or fail."""
     if state.validation is None:
@@ -156,7 +212,11 @@ def build_workflow() -> CompiledStateGraph[WorkflowState, None, WorkflowState, W
     graph.add_node("save_artifact", save_artifact_node)
     graph.add_node("fail", fail_node)
     graph.set_entry_point("collect_context")
-    graph.add_edge("collect_context", "generate_artifact")
+    graph.add_conditional_edges(
+        "collect_context",
+        should_generate_or_fail,
+        {"generate": "generate_artifact", "fail": "fail"},
+    )
     graph.add_conditional_edges(
         "generate_artifact",
         should_validate_or_fail,
