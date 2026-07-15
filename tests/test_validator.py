@@ -720,3 +720,113 @@ end
         stale = list(glob.glob(os.path.join(tmp_dir, "*.rb")))
         # Our temp files should not persist
         assert len(stale) == 0, f"Stale temp files found: {stale}"
+
+
+# --------------------------------------------------------------------------- #
+# 16. Adversarial tests — ZF-004: scope Ripper to MetasploitModule class
+# --------------------------------------------------------------------------- #
+
+# Module with empty MetasploitModule class; required methods and metadata
+# live in a sibling class and a top-level hash. The old global walk would
+# pass this; the scoped walk must reject it.
+ADVERSARIAL_SIBLING_MODULE = """
+class MetasploitModule < Msf::Exploit::Remote
+end
+
+class FakeModule
+  def initialize(info = {})
+    super(update_info(info,
+      'Name' => 'Test',
+      'Description' => 'Test',
+      'Author' => ['Test'],
+      'References' => [],
+      'License' => MSF_LICENSE
+    ))
+  end
+
+  def exploit
+  end
+end
+"""
+
+# Module with MetasploitModule class but metadata keys only in a top-level
+# hash, not inside the class's initialize/update_info call.
+ADVERSARIAL_TOPLEVEL_METADATA = """
+metadata = {
+  'Name' => 'Decoy',
+  'Description' => 'Decoy',
+  'Author' => ['Decoy'],
+  'References' => [],
+  'License' => 'Decoy'
+}
+
+class MetasploitModule < Msf::Exploit::Remote
+  def initialize(info = {})
+    super(update_info(info,
+      'License' => MSF_LICENSE
+    ))
+  end
+
+  def exploit
+  end
+end
+"""
+
+# Module with MetasploitModule class containing superclass and exploit,
+# but initialize is in a sibling class.
+ADVERSARIAL_SIBLING_INITIALIZE = """
+class MetasploitModule < Msf::Exploit::Remote
+  def exploit
+  end
+end
+
+class Helper
+  def initialize(info = {})
+    super(update_info(info,
+      'Name' => 'Test',
+      'Description' => 'Test',
+      'Author' => ['Test'],
+      'References' => [],
+      'License' => MSF_LICENSE
+    ))
+  end
+end
+"""
+
+
+def test_adversarial_sibling_class_methods_not_counted():
+    """Methods in a sibling class must NOT satisfy MetasploitModule validation."""
+    result = validate_metasploit(ADVERSARIAL_SIBLING_MODULE)
+    assert result["is_valid"] is False
+    assert any("initialize" in e for e in result["errors"])
+    assert any("exploit" in e for e in result["errors"])
+    assert any("Name" in e for e in result["errors"])
+
+
+def test_adversarial_toplevel_metadata_not_counted():
+    """Metadata keys in a top-level hash must NOT satisfy MetasploitModule validation."""
+    result = validate_metasploit(ADVERSARIAL_TOPLEVEL_METADATA)
+    assert result["is_valid"] is False
+    assert any("Name" in e for e in result["errors"])
+    assert any("Description" in e for e in result["errors"])
+    assert any("Author" in e for e in result["errors"])
+    assert any("References" in e for e in result["errors"])
+    # License IS inside the class, so it should not be in errors
+    assert not any("'License'" in e for e in result["errors"])
+
+
+def test_adversarial_sibling_initialize_not_counted():
+    """initialize in a sibling class must NOT satisfy MetasploitModule validation."""
+    result = validate_metasploit(ADVERSARIAL_SIBLING_INITIALIZE)
+    assert result["is_valid"] is False
+    assert any("initialize" in e for e in result["errors"])
+    assert any("Name" in e for e in result["errors"])
+    assert any("Description" in e for e in result["errors"])
+
+
+def test_valid_module_still_passes_scoped_walk():
+    """A genuinely valid module must still pass after the scoping fix."""
+    runner = FakeRubyRunner()
+    result = validate_metasploit(VALID_MODULE, ruby_runner=runner)
+    assert result["is_valid"] is True
+    assert len(result["errors"]) == 0

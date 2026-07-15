@@ -98,8 +98,8 @@ def _javascript_syntax_failure(content: str) -> dict[str, Any] | None:
 
 
 # Ruby AST analysis script using the standard-library Ripper parser.
-# Walks the Ripper sexp to verify that required structural elements exist
-# as real syntax nodes (not text inside comments, strings, or heredocs).
+# Locates the MetasploitModule class node first, then inspects superclass,
+# required methods, and metadata keys ONLY inside that class body.
 _RIPPER_SCRIPT = r'''require 'ripper'
 require 'json'
 
@@ -124,7 +124,7 @@ def extract_consts(node)
   consts = []
   return consts unless node.is_a?(Array)
   consts << node[1] if node[0] == :@const && node[1].is_a?(String)
-  node.each { |child| consts.concat(extract_consts(child)) }
+  node.each { |child| consts.concat(extract_consts(child)) if child.is_a?(Array) }
   consts
 end
 
@@ -141,30 +141,35 @@ def extract_string_value(node)
   result
 end
 
-found = {
-  'has_metasploit_module_class' => false,
-  'has_metasploit_superclass' => false,
-  'has_initialize_method' => false,
-  'has_exploit_method' => false,
-  'metadata_keys_found' => []
-}
-
-def walk(node, found, required_keys)
-  return unless node.is_a?(Array)
+# Find the MetasploitModule class node and return [superclass_node, body_node].
+# Returns [nil, nil] if not found.
+def find_metasploit_module(node)
+  return [nil, nil] unless node.is_a?(Array)
 
   if node[0] == :class && node[1].is_a?(Array) && node[1][0] == :const_ref
     const_node = node[1]
     if const_node[1].is_a?(Array) && const_node[1][0] == :@const && const_node[1][1] == 'MetasploitModule'
-      found['has_metasploit_module_class'] = true
       superclass = node[2]
-      if superclass
-        consts = extract_consts(superclass)
-        if consts.include?('Msf') && consts.include?('Exploit')
-          found['has_metasploit_superclass'] = true
-        end
-      end
+      body = node[3]
+      return [superclass, body]
     end
   end
+
+  node.each do |child|
+    if child.is_a?(Array)
+      result = find_metasploit_module(child)
+      return result if result[0] || result[1]
+    end
+  end
+
+  [nil, nil]
+end
+
+# Walk only inside a specific subtree for methods and metadata keys.
+# Unlike the previous global walk, this does NOT traverse sibling classes
+# or top-level hashes outside the MetasploitModule class body.
+def walk_scope(node, found, required_keys)
+  return unless node.is_a?(Array)
 
   if node[0] == :def && node[1].is_a?(Array) && node[1][0] == :@ident
     method_name = node[1][1]
@@ -190,10 +195,29 @@ def walk(node, found, required_keys)
     end
   end
 
-  node.each { |child| walk(child, found, required_keys) }
+  node.each { |child| walk_scope(child, found, required_keys) if child.is_a?(Array) }
 end
 
-walk(sexp, found, REQUIRED_KEYS)
+superclass_node, body_node = find_metasploit_module(sexp)
+
+found = {
+  'has_metasploit_module_class' => false,
+  'has_metasploit_superclass' => false,
+  'has_initialize_method' => false,
+  'has_exploit_method' => false,
+  'metadata_keys_found' => []
+}
+
+if superclass_node || body_node
+  found['has_metasploit_module_class'] = true
+  if superclass_node
+    consts = extract_consts(superclass_node)
+    if consts.include?('Msf') && consts.include?('Exploit')
+      found['has_metasploit_superclass'] = true
+    end
+  end
+  walk_scope(body_node, found, REQUIRED_KEYS) if body_node
+end
 
 puts JSON.generate({
   'parseable' => true,
