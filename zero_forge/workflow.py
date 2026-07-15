@@ -142,11 +142,25 @@ def repair_artifact_node(state: WorkflowState) -> dict[str, Any]:
             "repair_attempts": state.repair_attempts + 1,
             "status": "failed",
         }
+    if repaired.metadata.get("stub"):
+        message = "Stub mode produced a placeholder during repair; no exploit artifact was produced"
+        return {
+            "artifact": repaired,
+            "error": message,
+            "failure": WorkflowError(
+                code="stub_artifact",
+                message=message,
+                provider="stub",
+                model=str(repaired.metadata.get("model", "")),
+            ),
+            "repair_attempts": state.repair_attempts + 1,
+            "status": "failed",
+        }
     return {
-    "artifact": repaired,
-    "repair_attempts": state.repair_attempts + 1,
-    "status": "repaired",
-}
+        "artifact": repaired,
+        "repair_attempts": state.repair_attempts + 1,
+        "status": "repaired",
+    }
 
 
 def save_artifact_node(state: WorkflowState) -> dict[str, Any]:

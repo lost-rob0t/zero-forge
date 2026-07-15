@@ -488,6 +488,50 @@ def test_resolve_provider_anthropic(monkeypatch):
     assert model == "anthropic/claude-3.5-sonnet"
 
 
+def test_repair_artifact_marks_stub_when_stub_mode(monkeypatch):
+    """repair_artifact must set metadata['stub']=True when stub mode produced it (issue #2)."""
+    monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    original = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend",
+        filename="test.rb",
+        metadata={"stub": False, "model": "test-model"},
+    )
+    validation = ValidationResult(is_valid=False, errors=["Missing method"])
+
+    repaired = repair_artifact(original, validation, _context())
+
+    assert repaired.metadata["stub"] is True
+    assert repaired.metadata["repaired"] is True
+
+
+def test_repair_artifact_preserves_stub_false_when_not_stub_mode(monkeypatch):
+    """repair_artifact must not set stub=True when stub mode is off (issue #2)."""
+    monkeypatch.delenv("ZERO_FORGE_STUB_MODE", raising=False)
+    monkeypatch.setattr(
+        smart_agent,
+        "_call_llm",
+        lambda *_args: "```ruby\nclass MetasploitModule\nend\n```",
+    )
+
+    original = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class Foo\nend",
+        filename="test.rb",
+        metadata={"stub": False, "model": "test-model"},
+    )
+    validation = ValidationResult(is_valid=False, errors=["Missing method"])
+
+    repaired = repair_artifact(original, validation, _context())
+
+    assert repaired.metadata["stub"] is False
+    assert repaired.metadata["repaired"] is True
+
+
 def test_resolve_provider_without_key(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

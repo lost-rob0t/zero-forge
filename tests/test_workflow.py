@@ -5,12 +5,20 @@ from __future__ import annotations
 import pytest
 
 from zero_forge.agents.smart_agent import LLMConfigurationError, LLMProviderError
-from zero_forge.schemas import ArtifactType, CollectedContext, VulnerabilityInput, WorkflowState
+from zero_forge.schemas import (
+    Artifact,
+    ArtifactType,
+    CollectedContext,
+    ValidationResult,
+    VulnerabilityInput,
+    WorkflowState,
+)
 from zero_forge.tools.validator import ValidatorRuntimeUnavailable
 from zero_forge.workflow import (
     build_workflow,
     collect_context_node,
     generate_artifact_node,
+    repair_artifact_node,
     run_workflow,
 )
 
@@ -194,3 +202,31 @@ def test_tool_model_configuration_failure_is_role_specific(monkeypatch):
     assert patch["status"] == "failed"
     assert patch["failure"].role == "tool"
     assert patch["failure"].model == "openrouter/cheap-tool-caller"
+
+
+def test_repair_artifact_node_routes_stub_to_fail(monkeypatch):
+    """repair_artifact_node must return stub_artifact failure when stub mode produced repair (issue #2)."""
+    from zero_forge.config import reset_settings
+
+    monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
+    reset_settings()
+
+    artifact = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend",
+        filename="test.rb",
+        metadata={"stub": False, "model": "test-model"},
+    )
+    state = WorkflowState(
+        vuln_input=_input(),
+        context=CollectedContext(cve_id="CVE-2021-44228"),
+        artifact=artifact,
+        validation=ValidationResult(is_valid=False, errors=["Missing method"]),
+    )
+
+    patch = repair_artifact_node(state)
+
+    assert patch["status"] == "failed"
+    assert patch["failure"].code == "stub_artifact"
+    assert patch["artifact"].metadata["stub"] is True
+    assert patch["repair_attempts"] == 1
