@@ -367,7 +367,7 @@ def test_zap_active_requires_category_metadata():
 
 
 def test_zap_active_requires_detection_flow():
-    content = Path("llm_examples/zap/active/reflected_input.js").read_text(
+    content = (default_examples_root() / "zap" / "active" / "reflected_input.js").read_text(
         encoding="utf-8"
     )
     content = content.replace("as.sendAndReceive(probe, false, false);", "")
@@ -379,7 +379,7 @@ def test_zap_active_requires_detection_flow():
 
 
 def test_zap_passive_rejects_network_side_effects():
-    content = Path("llm_examples/zap/passive/missing_csp.js").read_text(
+    content = (default_examples_root() / "zap" / "passive" / "missing_csp.js").read_text(
         encoding="utf-8"
     )
     content = content.replace(
@@ -395,7 +395,7 @@ def test_zap_passive_rejects_network_side_effects():
 
 
 def test_zap_passive_ignores_forbidden_words_in_comments_and_strings():
-    content = Path("llm_examples/zap/passive/missing_csp.js").read_text(
+    content = (default_examples_root() / "zap" / "passive" / "missing_csp.js").read_text(
         encoding="utf-8"
     )
     content += '\n// sendAndReceive fetch XMLHttpRequest\nconst note = "HttpSender";\n'
@@ -406,7 +406,7 @@ def test_zap_passive_ignores_forbidden_words_in_comments_and_strings():
 
 
 def test_zap_metadata_inside_comment_does_not_satisfy_contract():
-    content = Path("llm_examples/zap/passive/missing_csp.js").read_text(
+    content = (default_examples_root() / "zap" / "passive" / "missing_csp.js").read_text(
         encoding="utf-8"
     )
     content = content.replace(
