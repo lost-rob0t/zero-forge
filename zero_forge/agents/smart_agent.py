@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from ..config import get_settings
 from ..schemas import (
     Artifact,
@@ -25,6 +27,9 @@ __all__ = [
     "LLMProviderError",
     "LLMResponseError",
 ]
+
+logger = logging.getLogger(__name__)
+
 
 SYSTEM_PROMPT = """\
 You are a senior security researcher specializing in vulnerability analysis and
@@ -206,10 +211,57 @@ end
 ```"""
 
 
+refusal_phrases = (
+    "i cannot",
+    "i can't",
+    "i am unable",
+    "i'm unable",
+    "i'm sorry",
+    "i apologize",
+    "as an ai",
+    "as a language model",
+    "i'm not able",
+    "i will not",
+    "i won't",
+)
+
+
+def _is_refusal(text: str) -> bool:
+    """Heuristic: detect content-filter refusal in LLM output."""
+    lower = text.strip().lower()
+    if not lower:
+        return True
+    # If it looks like Ruby/Metasploit code, it's not a refusal
+    if "class " in lower or "def " in lower or "msf::" in lower:
+        return False
+    return any(phrase in lower for phrase in refusal_phrases)
+
+
+def _check_refusal(code: str, phase: str) -> str:
+    """Detect content-filter refusal and log/print a warning.
+
+    Returns the original *code* if it appears to be valid output, or a Ruby
+    comment placeholder so downstream validation surfaces the problem rather
+    than silently passing.
+    """
+    if not _is_refusal(code):
+        return code
+    cfg = get_settings()
+    resolved = resolve_model("smart", cfg.models.smart)
+    msg = (
+        f"Content-filter refusal detected during {phase}: "
+        f"no code block extracted (provider={resolved.provider}, model={resolved.model})"
+    )
+    logger.warning(msg)
+    print(f"# ZeroForge WARNING: {msg}")
+    return f"# ZeroForge WARNING: {msg}\n"
+
+
 def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext) -> Artifact:
     prompt = _build_context_prompt(vuln_input, context)
     raw = _call_llm(SYSTEM_PROMPT, prompt)
     code = _extract_code_block(raw)
+    code = _check_refusal(code, "generation")
     cfg = get_settings()
     return Artifact(
         artifact_type=ArtifactType.METASPLOIT,
@@ -230,7 +282,8 @@ def repair_artifact(
     prompt = _build_repair_prompt(artifact, validation)
     raw = _call_llm(SYSTEM_PROMPT, prompt)
     code = _extract_code_block(raw)
-    if not code.strip():
+    if _is_refusal(code):
+        _check_refusal(code, "repair")
         return artifact
     return Artifact(
         artifact_type=artifact.artifact_type,

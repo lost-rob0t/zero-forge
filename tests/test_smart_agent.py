@@ -130,6 +130,46 @@ def test_build_repair_prompt_uses_reframed_language():
     assert "fix the exploit" not in prompt.lower()
 
 
+def test_generate_artifact_logs_refusal_on_empty_code(monkeypatch, capsys):
+    """Empty code extraction triggers refusal warning, not silent stub (issue #74)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_litellm(monkeypatch, lambda **_kw: SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="I cannot help with that."))]
+    ))
+
+    artifact = generate_artifact(
+        VulnerabilityInput(cve_id="CVE-2021-44228"),
+        _context(),
+    )
+
+    assert "ZeroForge WARNING" in artifact.content
+    assert "refusal" in artifact.content.lower()
+    captured = capsys.readouterr()
+    assert "ZeroForge WARNING" in captured.out
+
+
+def test_repair_artifact_logs_refusal_on_empty_code(monkeypatch, capsys):
+    """Empty repair code triggers refusal warning and returns original artifact (issue #74)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_litellm(monkeypatch, lambda **_kw: SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="I cannot help with that."))]
+    ))
+
+    original = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend",
+        filename="test.rb",
+    )
+    validation = ValidationResult(is_valid=False, errors=["Missing method"])
+
+    repaired = repair_artifact(original, validation, _context())
+
+    assert repaired is original
+    captured = capsys.readouterr()
+    assert "ZeroForge WARNING" in captured.out
+    assert "repair" in captured.out.lower()
+
+
 def test_explicit_stub_mode_marks_artifact(monkeypatch):
     monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
