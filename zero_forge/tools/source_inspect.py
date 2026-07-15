@@ -329,7 +329,7 @@ def read_source_files(
             break
         if total_bytes + cand["size"] > _MAX_READ_BYTES:
             truncated = True
-            break
+            continue
         if time.monotonic() - read_start > _READ_TIMEOUT:
             truncated = True
             break
@@ -404,14 +404,18 @@ def search_code(
         # admitted set so the caller's list is never treated as authorization.
         admitted_raw = read_source_files(source_path, unsafe=False)
         admitted_set = {
-            r["path"] for r in admitted_raw if not r.get("skipped")
+            r["path"] for r in admitted_raw
+            if not r.get("skipped") and not r.get("truncated")
         }
         search_files = [p for p in allowed_paths if p in admitted_set]
         rg_targets = search_files
     else:
         # Safe without allowlist: apply policy via read_source_files().
         admitted = read_source_files(source_path, unsafe=False)
-        search_files = [r["path"] for r in admitted if not r.get("skipped")]
+        search_files = [
+            r["path"] for r in admitted
+            if not r.get("skipped") and not r.get("truncated")
+        ]
         rg_targets = search_files
 
     if not search_files:

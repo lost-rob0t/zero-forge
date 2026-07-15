@@ -947,3 +947,35 @@ def test_bounded_read_skipped_still_present_with_truncation():
         assert len(skipped) >= 1
         assert any(".env" == s.get("filename") for s in skipped)
         assert len(truncated) == 1
+
+
+def test_search_code_excludes_truncation_entry_from_targets(monkeypatch):
+    """The <budget> truncation entry must not leak into search_code rg_targets.
+
+    When read_source_files() returns a truncation entry (path='<budget>'),
+    search_code() must exclude it from rg_targets so ripgrep doesn't fail
+    on a non-existent path and silently fall through to the Python fallback.
+    """
+    import zero_forge.tools.source_inspect as si
+
+    captured_args: list[list[str]] = []
+    real_run = si.subprocess.run
+
+    def _capturing_run(args, **kwargs):
+        captured_args.append(args)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(si.subprocess, "run", _capturing_run)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create enough files to trigger truncation with default max_files=20
+        for i in range(30):
+            (Path(tmpdir) / f"file_{i:02d}.py").write_text(f"# CVE-2021-44228 match {i}\n")
+        results = search_code(tmpdir, "CVE-2021-44228")
+        # Results should be non-empty (matches found)
+        assert len(results) > 0
+        # The <budget> path must NOT appear in any rg command args
+        for args in captured_args:
+            assert "<budget>" not in args, (
+                "<budget> truncation entry leaked into rg_targets"
+            )
