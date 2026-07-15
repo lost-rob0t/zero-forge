@@ -246,6 +246,69 @@ def test_tool_agent_repairs_invalid_arguments_before_execution(monkeypatch):
     assert "Invalid arguments" in requests[1][-1]["content"]
 
 
+def test_tool_agent_repairs_changed_locked_argument_before_execution(monkeypatch):
+    responses = iter(
+        [
+            '{"name":"reader","arguments":{"source_path":"/repo","unsafe":true}}',
+            '{"name":"reader","arguments":{"source_path":"/repo","unsafe":false}}',
+        ]
+    )
+    requests = []
+    executed_with = []
+
+    def completion(**kwargs):
+        requests.append(kwargs["messages"])
+        message = SimpleNamespace(content=next(responses))
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    def reader(source_path: str, unsafe: bool = False) -> list[dict]:
+        executed_with.append((source_path, unsafe))
+        return []
+
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    registry = ToolRegistry()
+    registry.register("reader", reader)
+
+    result = ToolAgent(registry).run(
+        ToolRequest(
+            objective="Read safe source context",
+            allowed_tools=["reader"],
+            arguments={"source_path": "/repo", "unsafe": False},
+            locked_arguments={"source_path": "/repo", "unsafe": False},
+        )
+    )
+
+    assert result.error == ""
+    assert executed_with == [("/repo", False)]
+    assert "changed locked argument(s): unsafe" in requests[1][-1]["content"]
+
+
+def test_validation_rejects_model_substituted_content(monkeypatch):
+    executed_with = []
+
+    def completion(**_kwargs):
+        message = SimpleNamespace(
+            content='{"name":"validate_metasploit","arguments":{"content":"replacement"}}'
+        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    def validate_metasploit(content: str) -> dict:
+        executed_with.append(content)
+        return {"is_valid": True}
+
+    monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("ZERO_FORGE_MAX_REPAIR_ATTEMPTS", "0")
+    registry = ToolRegistry()
+    registry.register("validate_metasploit", validate_metasploit)
+
+    with pytest.raises(ToolSelectionError, match="changed locked argument.*content"):
+        ToolAgent(registry).validate_artifact("original", "metasploit")
+
+    assert executed_with == []
+
+
 def test_tool_agent_repairs_empty_response(monkeypatch):
     responses = iter(["", '{"name":"noop","arguments":{}}'])
     requests = []
