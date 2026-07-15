@@ -587,6 +587,102 @@ def _missing_tokens(code: str, requirements: dict[str, str], errors: list[str]) 
             errors.append(message)
 
 
+def _extract_scan_body(code: str) -> str:
+    """Extract the body of the first scan() function from stripped code."""
+    match = re.search(r"\bfunction\s+scan\s*\([^)]*\)\s*\{", code)
+    if match is None:
+        return ""
+    start = match.end()
+    depth = 1
+    i = start
+    while i < len(code) and depth > 0:
+        if code[i] == "{":
+            depth += 1
+        elif code[i] == "}":
+            depth -= 1
+        i += 1
+    return code[start : i - 1] if depth == 0 else code[start:]
+
+
+def _find_first(scan_body: str, token: str) -> int:
+    """Return the character index of the first occurrence of token, or -1."""
+    return scan_body.find(token)
+
+
+def _enforce_active_lifecycle(scan_body: str, errors: list[str]) -> None:
+    """Enforce ordered lifecycle: stop, clone, mutate, probe, inspect, alert."""
+    tokens = [
+        ("as.isStop", "stop check (as.isStop)"),
+        ("cloneRequest", "clone step (cloneRequest)"),
+        ("as.setParam", "mutation step (as.setParam)"),
+        ("as.sendAndReceive", "probe step (as.sendAndReceive)"),
+    ]
+    positions: list[int] = []
+    for token, label in tokens:
+        pos = _find_first(scan_body, token)
+        if pos == -1:
+            errors.append(f"Active rule missing required lifecycle step: {label}")
+        positions.append(pos)
+
+    # Find probe position to anchor inspection search after it
+    probe_pos = positions[3]  # as.sendAndReceive position
+    inspect_pos = -1
+    # Look for probe response inspection (probe.getResponseBody/getResponseHeader)
+    # rather than baseline (msg.getResponseBody/getResponseHeader)
+    for token in ("probe.getResponseBody", "probe.getResponseHeader"):
+        pos = _find_first(scan_body, token)
+        if pos != -1:
+            inspect_pos = pos
+            break
+    # Fall back to any getResponseBody/getResponseHeader if probe-prefixed not found
+    if inspect_pos == -1:
+        for token in ("getResponseBody", "getResponseHeader"):
+            pos = _find_first(scan_body, token)
+            if pos != -1:
+                inspect_pos = pos
+                break
+    if inspect_pos == -1:
+        errors.append(
+            "Active rule missing inspection step:"
+            " getResponseBody or getResponseHeader after probe"
+        )
+    elif probe_pos != -1 and inspect_pos < probe_pos:
+        errors.append(
+            "Active rule lifecycle ordering violated:"
+            " inspection must come after probe"
+        )
+        inspect_pos = -1  # avoid duplicate in monotonic check
+    positions.append(inspect_pos)
+
+    alert_pos = _find_first(scan_body, "as.newAlert")
+    if alert_pos == -1:
+        errors.append("Active rule missing alert step: as.newAlert")
+    positions.append(alert_pos)
+
+    labels = ["stop check", "clone", "mutation", "probe", "inspection", "alert"]
+    for i in range(1, len(positions)):
+        if positions[i] == -1 or positions[i - 1] == -1:
+            continue
+        if positions[i] < positions[i - 1]:
+            errors.append(
+                f"Active rule lifecycle ordering violated: {labels[i]}"
+                f" must come after {labels[i - 1]}"
+            )
+
+
+def _check_baseline_reference(code: str, warnings: list[str]) -> None:
+    """Warn if the original msg response is not referenced for baseline."""
+    has_baseline = (
+        "msg.getResponseBody" in code or "msg.getResponseHeader" in code
+    )
+    if not has_baseline:
+        warnings.append(
+            "Active rule does not reference"
+            " msg.getResponseBody/getResponseHeader"
+            " for baseline comparison before probing"
+        )
+
+
 def validate_zap_active_scan(content: str) -> dict[str, Any]:
     """Validate a JavaScript ZAP Active Rule detection artifact."""
     if not content or not content.strip():
@@ -607,13 +703,26 @@ def validate_zap_active_scan(content: str) -> dict[str, Any]:
     ):
         errors.append("Active rule must define function scan(as, msg, param, value)")
 
+    scan_body = _extract_scan_body(code)
+    if scan_body:
+        _enforce_active_lifecycle(scan_body, errors)
+    else:
+        _missing_tokens(
+            code,
+            {
+                "cloneRequest": "Active rule must clone the request before mutation",
+                "as.setParam": "Active rule must inject its probe with as.setParam(...)",
+                "as.sendAndReceive": "Active rule must send its probe with as.sendAndReceive(...)",
+                "as.newAlert": "Active rule must create an alert with as.newAlert(...)",
+            },
+            errors,
+        )
+        if "getResponseBody" not in code and "getResponseHeader" not in code:
+            errors.append("Active rule must inspect the probe response")
+
     _missing_tokens(
         code,
         {
-            "cloneRequest": "Active rule must clone the request before mutation",
-            "as.setParam": "Active rule must inject its probe with as.setParam(...)",
-            "as.sendAndReceive": "Active rule must send its probe with as.sendAndReceive(...)",
-            "as.newAlert": "Active rule must create an alert with as.newAlert(...)",
             ".setParam": "Active alert must identify the tested parameter",
             ".setAttack": "Active alert must record the probe value",
             ".setEvidence": "Active alert must record response evidence",
@@ -622,12 +731,12 @@ def validate_zap_active_scan(content: str) -> dict[str, Any]:
         },
         errors,
     )
-    if "getResponseBody" not in code and "getResponseHeader" not in code:
-        errors.append("Active rule must inspect the probe response")
     if not re.search(r"\bif\s*\(", code):
         errors.append("Active rule must gate its alert on a detection condition")
     if "as.isStop" not in code:
         warnings.append("Check as.isStop() before sending active probes")
+
+    _check_baseline_reference(code, warnings)
 
     return {"is_valid": not errors, "errors": errors, "warnings": warnings}
 
@@ -683,9 +792,32 @@ def validate_zap_passive_scan(content: str) -> dict[str, Any]:
         r"\bURLConnection\b|\bjava\.net\b": "Passive rules must not use network APIs",
         r"\b(?:ps|helper)\s*\.\s*setParam\s*\(": "Passive rules must not mutate parameters",
         r"\bmsg\s*\.\s*set(?:Request|Response)": "Passive rules must not mutate messages",
+        r"\bWebSocket\b": "Passive rules must not use WebSocket",
+        r"\bEventSource\b": "Passive rules must not use EventSource",
+        r"\bnavigator\.sendBeacon\b": "Passive rules must not use sendBeacon",
+        r"\bimportScripts\b": "Passive rules must not use importScripts",
+        r"\beval\s*\(": "Passive rules must not use eval",
+        r"\bFunction\s*\(": "Passive rules must not use Function constructor",
     }
     for pattern, message in forbidden_patterns.items():
         if re.search(pattern, code):
             errors.append(message)
+
+    # Check patterns that involve string literals against raw content
+    raw_forbidden_patterns = {
+        r'\bJava\.type\s*\(\s*["\' ][^"\' ]*(?:Network|Socket|Http|URL)': (
+            "Passive rules must not instantiate Java network classes"
+        ),
+    }
+    for pattern, message in raw_forbidden_patterns.items():
+        if re.search(pattern, content):
+            errors.append(message)
+
+    bracket_pattern = r'\b(?:ps|helper|msg|as)\s*\[\s*["\']'
+    if re.search(bracket_pattern, content):
+        warnings.append(
+            "Dynamic bracket-notation property access on ps/helper/msg/as"
+            " is suspicious in passive rules"
+        )
 
     return {"is_valid": not errors, "errors": errors, "warnings": warnings}

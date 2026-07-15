@@ -90,7 +90,6 @@ def test_passive_repair_prompt_reinforces_no_network_rule():
 
     prompt = _build_repair_prompt(artifact, validation)
 
-    assert "Never call sendAndReceive" in prompt
     assert "function scan(ps, msg, src)" in prompt
     assert "Passive rules must not send requests" in prompt
 

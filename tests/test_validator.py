@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 import pytest
 
+from zero_forge.agents.smart_agent import ArtifactType as _ArtifactType
+from zero_forge.agents.smart_agent import _profile as _get_profile
 from zero_forge.examples import default_examples_root
 from zero_forge.tools.validator import (
     DefaultRubyRunner,
@@ -374,7 +376,7 @@ def test_zap_active_requires_detection_flow():
     result = validate_zap_active_scan(content)
 
     assert result["is_valid"] is False
-    assert any("send its probe" in error for error in result["errors"])
+    assert any("probe step" in error or "send its probe" in error for error in result["errors"])
 
 
 def test_zap_passive_rejects_network_side_effects():
@@ -829,3 +831,185 @@ def test_valid_module_still_passes_scoped_walk():
     result = validate_metasploit(VALID_MODULE)
     assert result["is_valid"] is True
     assert len(result["errors"]) == 0
+
+
+# --- ZAP active lifecycle ordering tests (issue #96) ---------------------
+
+
+def test_zap_active_rejects_sendandreceive_before_clone():
+    """sendAndReceive before cloneRequest must fail lifecycle ordering."""
+    content = (
+        default_examples_root() / "zap" / "active" / "reflected_input.js"
+    ).read_text(encoding="utf-8")
+    content = content.replace(
+        "  const probe = msg.cloneRequest();\n"
+        "  as.setParam(probe, param, attack);\n"
+        "  as.sendAndReceive(probe, false, false);",
+        "  as.sendAndReceive(probe, false, false);\n"
+        "  const probe = msg.cloneRequest();\n"
+        "  as.setParam(probe, param, attack);",
+    )
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is False
+    assert any("ordering violated" in e for e in result["errors"])
+
+
+def test_zap_active_rejects_missing_clone():
+    """Missing cloneRequest must fail lifecycle enforcement."""
+    content = (
+        default_examples_root() / "zap" / "active" / "reflected_input.js"
+    ).read_text(encoding="utf-8")
+    content = content.replace("  const probe = msg.cloneRequest();", "")
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is False
+    assert any("clone step" in e for e in result["errors"])
+
+
+def test_zap_active_rejects_inspection_before_probe():
+    """Inspection (getResponseBody) before sendAndReceive must fail."""
+    content = (
+        default_examples_root() / "zap" / "active" / "reflected_input.js"
+    ).read_text(encoding="utf-8")
+    content = content.replace(
+        "  as.sendAndReceive(probe, false, false);\n\n  const body = probe.getResponseBody().toString();",
+        "  const body = probe.getResponseBody().toString();\n\n  as.sendAndReceive(probe, false, false);",
+    )
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is False
+    assert any("ordering violated" in e for e in result["errors"])
+
+
+def test_zap_active_warns_on_missing_baseline_reference():
+    """Active rule without msg.getResponseBody/getResponseHeader should warn."""
+    content = (
+        default_examples_root() / "zap" / "active" / "reflected_input.js"
+    ).read_text(encoding="utf-8")
+    content = content.replace(
+        "  const baselineBody = msg.getResponseBody().toString();\n",
+        "",
+    )
+    result = validate_zap_active_scan(content)
+    assert any("baseline" in w.lower() for w in result["warnings"])
+
+
+def test_zap_active_examples_still_pass():
+    """All existing active examples must still pass the reworked validator."""
+    for path in sorted((default_examples_root() / "zap" / "active").glob("*.js")):
+        result = validate_zap_active_scan(path.read_text(encoding="utf-8"))
+        assert result["is_valid"] is True, f"{path.name} failed: {result['errors']}"
+
+
+# --- ZAP passive forbidden pattern tests (issue #96) -------------------
+
+
+def _make_passive_with_forbidden(needle: str) -> str:
+    """Take missing_csp.js and inject a forbidden call into the scan body."""
+    content = (
+        default_examples_root() / "zap" / "passive" / "missing_csp.js"
+    ).read_text(encoding="utf-8")
+    return content.replace(
+        "  if (!contentType.includes(\"text/html\") || policy !== null) {",
+        f"  {needle}\n  if (!contentType.includes(\"text/html\") || policy !== null) {{",
+    )
+
+
+def test_zap_passive_rejects_websocket():
+    result = validate_zap_passive_scan(_make_passive_with_forbidden("var ws = new WebSocket();"))
+    assert result["is_valid"] is False
+    assert any("WebSocket" in e for e in result["errors"])
+
+
+def test_zap_passive_rejects_eventsource():
+    result = validate_zap_passive_scan(_make_passive_with_forbidden("var es = new EventSource();"))
+    assert result["is_valid"] is False
+    assert any("EventSource" in e for e in result["errors"])
+
+
+def test_zap_passive_rejects_sendbeacon():
+    result = validate_zap_passive_scan(_make_passive_with_forbidden("navigator.sendBeacon();"))
+    assert result["is_valid"] is False
+    assert any("sendBeacon" in e for e in result["errors"])
+
+
+def test_zap_passive_rejects_importscripts():
+    result = validate_zap_passive_scan(_make_passive_with_forbidden("importScripts();"))
+    assert result["is_valid"] is False
+    assert any("importScripts" in e for e in result["errors"])
+
+
+def test_zap_passive_rejects_eval():
+    result = validate_zap_passive_scan(_make_passive_with_forbidden("eval();"))
+    assert result["is_valid"] is False
+    assert any("eval" in e for e in result["errors"])
+
+
+def test_zap_passive_rejects_function_constructor():
+    result = validate_zap_passive_scan(_make_passive_with_forbidden("new Function();"))
+    assert result["is_valid"] is False
+    assert any("Function constructor" in e for e in result["errors"])
+
+
+def test_zap_passive_rejects_java_type_network_class():
+    result = validate_zap_passive_scan(
+        _make_passive_with_forbidden('Java.type("java.net.URL")')
+    )
+    assert result["is_valid"] is False
+    assert any("Java network" in e for e in result["errors"])
+
+
+def test_zap_passive_warns_on_bracket_notation():
+    """Dynamic bracket-notation property access on ps/msg should warn."""
+    result = validate_zap_passive_scan(_make_passive_with_forbidden('ps["sendAndReceive"]'))
+    assert any("bracket" in w.lower() for w in result["warnings"])
+
+
+def test_zap_passive_examples_still_pass():
+    """All existing passive examples must still pass the reworked validator."""
+    for path in sorted((default_examples_root() / "zap" / "passive").glob("*.js")):
+        result = validate_zap_passive_scan(path.read_text(encoding="utf-8"))
+        assert result["is_valid"] is True, f"{path.name} failed: {result['errors']}"
+
+
+# --- Prompt language tests (issue #96) ---------------------------------
+
+
+def test_zap_active_prompt_no_prohibition_language():
+    """ZAP_ACTIVE prompts must not contain prohibition language."""
+
+    profile = _get_profile(_ArtifactType.ZAP_ACTIVE)
+    text = profile.system_instructions + profile.contract
+    assert "must never" not in text.lower()
+    assert "never call" not in text.lower()
+    assert "must not" not in text.lower()
+
+
+def test_zap_passive_prompt_no_prohibition_language():
+    """ZAP_PASSIVE prompts must not contain prohibition language."""
+
+    profile = _get_profile(_ArtifactType.ZAP_PASSIVE)
+    text = profile.system_instructions + profile.contract
+    assert "must never" not in text.lower()
+    assert "never call" not in text.lower()
+    assert "must not" not in text.lower()
+
+
+def test_zap_active_prompt_describes_lifecycle():
+    """ZAP_ACTIVE prompt must contain lifecycle keywords."""
+
+    profile = _get_profile(_ArtifactType.ZAP_ACTIVE)
+    text = (profile.system_instructions + profile.contract).lower()
+    assert "clone" in text
+    assert "sendandreceive" in text
+    assert "inspect" in text
+    assert "alert" in text
+
+
+def test_zap_passive_prompt_describes_inspection_only():
+    """ZAP_PASSIVE prompt must describe inspection without listing forbidden APIs."""
+
+    profile = _get_profile(_ArtifactType.ZAP_PASSIVE)
+    text = (profile.system_instructions + profile.contract).lower()
+    assert "inspect" in text
+    assert "sendandreceive" not in text
+    assert "fetch" not in text
+    assert "httpsender" not in text
