@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +13,69 @@ from ..logging_config import get_logger
 from ..schemas import WorkflowError
 
 logger = get_logger(__name__)
+
+_MODEL_LIMITS_CACHE: dict[str, int | None] = {}
+
+_OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+
+
+def reset_model_limits_cache() -> None:
+    """Clear the session-level model limits cache (for tests)."""
+    _MODEL_LIMITS_CACHE.clear()
+
+
+def _resolve_openrouter_limit(model_id: str) -> int | None:
+    """Query the public OpenRouter models endpoint for max_completion_tokens."""
+    bare = model_id.removeprefix("openrouter/")
+    try:
+        with urllib.request.urlopen(_OPENROUTER_MODELS_URL, timeout=10) as resp:  # noqa: S310
+            data = json.loads(resp.read())
+    except Exception as exc:
+        logger.debug("OpenRouter models lookup failed for %s: %s", bare, exc)
+        return None
+    for entry in data.get("data", []):
+        if entry.get("id") == bare:
+            top = entry.get("top_provider") or {}
+            val = top.get("max_completion_tokens")
+            if isinstance(val, int) and val > 0:
+                return val
+    return None
+
+
+def _resolve_litellm_limit(model: str) -> int | None:
+    """Use litellm.model_cost for OpenAI/Anthropic models."""
+    try:
+        import litellm
+
+        cost = litellm.model_cost  # type: ignore[attr-defined]
+    except Exception as exc:
+        logger.debug("litellm model_cost lookup failed for %s: %s", model, exc)
+        return None
+    for key in (model, model.split("/", 1)[-1]):
+        entry = cost.get(key, {})
+        val = entry.get("max_tokens") or entry.get("max_output_tokens")
+        if isinstance(val, int) and val > 0:
+            return val
+    return None
+
+
+def resolve_model_limits(model: str, provider: str, api_key: str | None) -> int | None:
+    """Query provider API for model max_completion_tokens. Cached per model.
+
+    Returns None if the lookup fails so callers fall back to config defaults.
+    """
+    cache_key = f"{provider}:{model}"
+    if cache_key in _MODEL_LIMITS_CACHE:
+        return _MODEL_LIMITS_CACHE[cache_key]
+
+    result: int | None = None
+    if provider == "openrouter":
+        result = _resolve_openrouter_limit(model)
+    elif provider in ("openai", "anthropic"):
+        result = _resolve_litellm_limit(model)
+
+    _MODEL_LIMITS_CACHE[cache_key] = result
+    return result
 
 
 
@@ -157,11 +223,29 @@ def call_model(
     if additional_messages:
         messages.extend(additional_messages)
 
+    # Determine effective max_tokens: auto-infer from provider API when enabled
+    # and the user has not explicitly set the role-specific max_tokens env var.
+    max_tokens = config.max_tokens
+    if config.auto_max_tokens:
+        env_var = f"ZERO_FORGE_{role.upper()}_MAX_TOKENS"
+        if not os.environ.get(env_var):
+            inferred = resolve_model_limits(
+                resolved.model, resolved.provider, resolved.api_key,
+            )
+            if inferred is not None:
+                max_tokens = min(inferred, config.inferred_max_token_cap)
+                logger.debug(
+                    "Auto-inferred max_tokens=%d for role=%s model=%s "
+                    "(inferred=%d, cap=%d)",
+                    max_tokens, role, resolved.model,
+                    inferred, config.inferred_max_token_cap,
+                )
+
     logger.trace(  # type: ignore[attr-defined]
         "LLM request role=%s provider=%s model=%s attempt=%d/%d "
-        "system_prompt=%r user_prompt=%.500r",
+        "max_tokens=%d system_prompt=%r user_prompt=%.500r",
         role, resolved.provider, resolved.model, attempt, max_attempts,
-        system_prompt, user_prompt,
+        max_tokens, system_prompt, user_prompt,
     )
 
     try:
@@ -172,7 +256,7 @@ def call_model(
             api_key=resolved.api_key,
             messages=messages,
             temperature=config.temperature,
-            max_tokens=config.max_tokens,
+            max_tokens=max_tokens,
             **resolved.extra_kwargs,
         )
     except Exception as exc:
