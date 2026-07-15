@@ -71,7 +71,6 @@ class ValidationResult(BaseModel):
     is_valid: bool
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
-    runtime_error: bool = False
 
 
 class ToolRequest(StrictSchema):
