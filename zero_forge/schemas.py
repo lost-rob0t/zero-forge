@@ -25,6 +25,7 @@ class VulnerabilityInput(BaseModel):
     source_path: str | None = Field(default=None, description="Path to vulnerable source code")
     patch_diff: str = Field(default="", description="Patch or git diff as text")
 
+
 class SourceFile(BaseModel):
     """A single source file inspected by the harness."""
 
