@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+import yaml
+
 META_REQUIRED_KEYS = {
     "Name": "Module name",
     "Description": "Module description",
@@ -24,6 +26,11 @@ RUBY_UNAVAILABLE_ERROR = (
     f"Ruby {RUBY_VERSION} is required for Metasploit validation but was not found "
     "on PATH; install Ruby 3.3.8 and retry"
 )
+NODE_TIMEOUT = 10.0
+NODE_UNAVAILABLE_ERROR = (
+    "Node.js is required for ZAP JavaScript syntax validation but was not found "
+    "on PATH; install Node.js and retry"
+)
 
 
 class ValidatorRuntimeUnavailable(RuntimeError):
@@ -36,6 +43,59 @@ def require_ruby_runtime(ruby_executable: str = "ruby") -> str:
     if path is None:
         raise ValidatorRuntimeUnavailable(RUBY_UNAVAILABLE_ERROR)
     return path
+
+
+def require_node_runtime(node_executable: str = "node") -> str:
+    """Return the Node.js executable path or raise one actionable preflight error."""
+    path = shutil.which(node_executable)
+    if path is None:
+        raise ValidatorRuntimeUnavailable(NODE_UNAVAILABLE_ERROR)
+    return path
+
+
+def _javascript_syntax_failure(content: str) -> dict[str, Any] | None:
+    """Return a fail-closed validation result when Node.js rejects JavaScript syntax."""
+    try:
+        node = require_node_runtime()
+        result = subprocess.run(
+            [node, "--check"],
+            input=content,
+            capture_output=True,
+            text=True,
+            timeout=NODE_TIMEOUT,
+            shell=False,
+        )
+    except ValidatorRuntimeUnavailable as exc:
+        return {
+            "is_valid": False,
+            "errors": [str(exc)],
+            "warnings": [],
+            "runtime_error": True,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "is_valid": False,
+            "errors": ["JavaScript syntax check timed out"],
+            "warnings": [],
+            "runtime_error": True,
+        }
+    except Exception as exc:
+        return {
+            "is_valid": False,
+            "errors": [f"JavaScript syntax check failed: {exc}"],
+            "warnings": [],
+            "runtime_error": True,
+        }
+
+    if result.returncode == 0:
+        return None
+    detail = (result.stderr.strip() or result.stdout.strip() or "unknown syntax error")[:500]
+    return {
+        "is_valid": False,
+        "errors": [f"JavaScript syntax error: {detail}"],
+        "warnings": [],
+    }
+
 
 # Ruby AST analysis script using the standard-library Ripper parser.
 # Walks the Ripper sexp to verify that required structural elements exist
@@ -330,7 +390,7 @@ def validate_metasploit(
 
     return {"is_valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
-_ZAP_METADATA_KEYS = (
+_ZAP_COMMON_METADATA_KEYS = (
     "id",
     "name",
     "description",
@@ -342,6 +402,22 @@ _ZAP_METADATA_KEYS = (
     "wascId",
     "status",
 )
+_ZAP_ACTIVE_METADATA_KEYS = (*_ZAP_COMMON_METADATA_KEYS, "category")
+_ZAP_RISK_VALUES = {"info", "low", "medium", "high"}
+_ZAP_CONFIDENCE_VALUES = {
+    "false_positive",
+    "low",
+    "medium",
+    "high",
+    "user_confirmed",
+}
+_ZAP_ACTIVE_CATEGORY_VALUES = {
+    "info_gather",
+    "browser",
+    "server",
+    "misc",
+    "injection",
+}
 
 
 def _strip_javascript_literals(content: str) -> str:
@@ -408,23 +484,13 @@ def _strip_javascript_literals(content: str) -> str:
     return "".join(output)
 
 
-def _validate_balanced_javascript(code: str, errors: list[str]) -> None:
-    code = re.sub(r"/(?:\\.|[^/\\\n])+/[a-z]*", " ", code)
-    for opening, closing in (("(", ")"), ("{", "}"), ("[", "]")):
-        depth = 0
-        for character in code:
-            if character == opening:
-                depth += 1
-            elif character == closing:
-                depth -= 1
-                if depth < 0:
-                    errors.append(f"Unbalanced JavaScript delimiter: unexpected '{closing}'")
-                    break
-        if depth > 0:
-            errors.append(f"Unbalanced JavaScript delimiter: missing '{closing}'")
-
-
-def _validate_zap_metadata(content: str, code: str, errors: list[str]) -> None:
+def _validate_zap_metadata(
+    content: str,
+    code: str,
+    errors: list[str],
+    *,
+    active: bool,
+) -> None:
     if not re.search(r"\bfunction\s+getMetadata\s*\(\s*\)", code):
         errors.append("Missing required function: 'getMetadata'")
     if "ScanRuleMetadata.fromYaml" not in code:
@@ -448,23 +514,48 @@ def _validate_zap_metadata(content: str, code: str, errors: list[str]) -> None:
         errors.append("Missing ScanRuleMetadata YAML template literal")
         return
 
-    metadata = match.group("yaml")
-    for key in _ZAP_METADATA_KEYS:
-        if not re.search(rf"(?m)^\s*{re.escape(key)}\s*:", metadata):
+    try:
+        metadata = yaml.safe_load(match.group("yaml"))
+    except yaml.YAMLError as exc:
+        errors.append(f"Invalid ZAP metadata YAML: {exc}")
+        return
+    if not isinstance(metadata, dict):
+        errors.append("ZAP metadata YAML must define a mapping")
+        return
+
+    required_keys = _ZAP_ACTIVE_METADATA_KEYS if active else _ZAP_COMMON_METADATA_KEYS
+    for key in required_keys:
+        if key not in metadata:
             errors.append(f"Missing required ZAP metadata key: '{key}'")
-    if not re.search(r"(?m)^\s*id\s*:\s*\d+\s*$", metadata):
+
+    metadata_id = metadata.get("id")
+    if not isinstance(metadata_id, int) or isinstance(metadata_id, bool):
         errors.append("ZAP metadata 'id' must be numeric")
-    if not re.search(
-        r"(?mi)^\s*risk\s*:\s*(info|low|medium|high)\s*(?:#.*)?$", metadata
-    ):
+
+    risk = str(metadata.get("risk", "")).lower()
+    if risk not in _ZAP_RISK_VALUES:
         errors.append("ZAP metadata 'risk' must be info, low, medium, or high")
-    if not re.search(
-        r"(?mi)^\s*confidence\s*:\s*"
-        r"(false_positive|low|medium|high|user_confirmed)\s*(?:#.*)?$",
-        metadata,
-    ):
+
+    confidence = str(metadata.get("confidence", "")).lower()
+    if confidence not in _ZAP_CONFIDENCE_VALUES:
         errors.append("ZAP metadata 'confidence' has an unsupported value")
 
+    references = metadata.get("references")
+    if not isinstance(references, list) or not references:
+        errors.append("ZAP metadata 'references' must be a non-empty list")
+
+    for key in ("cweId", "wascId"):
+        value = metadata.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            errors.append(f"ZAP metadata '{key}' must be numeric")
+
+    if active:
+        category = str(metadata.get("category", "")).lower()
+        if category not in _ZAP_ACTIVE_CATEGORY_VALUES:
+            errors.append(
+                "ZAP active metadata 'category' must be info_gather, browser, "
+                "server, misc, or injection"
+            )
 
 def _missing_tokens(code: str, requirements: dict[str, str], errors: list[str]) -> None:
     for token, message in requirements.items():
@@ -477,11 +568,14 @@ def validate_zap_active_scan(content: str) -> dict[str, Any]:
     if not content or not content.strip():
         return {"is_valid": False, "errors": ["Empty ZAP active rule content"], "warnings": []}
 
+    syntax_failure = _javascript_syntax_failure(content)
+    if syntax_failure is not None:
+        return syntax_failure
+
     errors: list[str] = []
     warnings: list[str] = []
     code = _strip_javascript_literals(content)
-    _validate_balanced_javascript(code, errors)
-    _validate_zap_metadata(content, code, errors)
+    _validate_zap_metadata(content, code, errors, active=True)
 
     if not re.search(
         r"\bfunction\s+scan\s*\(\s*as\s*,\s*msg\s*,\s*param\s*,\s*value\s*\)",
@@ -519,11 +613,14 @@ def validate_zap_passive_scan(content: str) -> dict[str, Any]:
     if not content or not content.strip():
         return {"is_valid": False, "errors": ["Empty ZAP passive rule content"], "warnings": []}
 
+    syntax_failure = _javascript_syntax_failure(content)
+    if syntax_failure is not None:
+        return syntax_failure
+
     errors: list[str] = []
     warnings: list[str] = []
     code = _strip_javascript_literals(content)
-    _validate_balanced_javascript(code, errors)
-    _validate_zap_metadata(content, code, errors)
+    _validate_zap_metadata(content, code, errors, active=False)
 
     if not re.search(
         r"\bfunction\s+scan\s*\(\s*(?:ps|helper)\s*,\s*msg\s*,\s*src\s*\)",
