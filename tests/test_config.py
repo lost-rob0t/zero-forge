@@ -10,6 +10,8 @@ import yaml
 from zero_forge.config import (
     DEFAULT_CONFIG_PATHS,
     LLMConfig,
+    ModelConfig,
+    ModelsConfig,
     OutputConfig,
     WorkflowConfig,
     get_settings,
@@ -20,7 +22,6 @@ from zero_forge.config import (
 
 @pytest.fixture(autouse=True)
 def _reset_settings():
-    """Ensure the singleton is reset before and after each test."""
     reset_settings()
     yield
     reset_settings()
@@ -28,62 +29,90 @@ def _reset_settings():
 
 @pytest.fixture
 def clean_env(monkeypatch):
-    """Strip all ZERO_FORGE_/provider env vars so tests are deterministic."""
     for key in list(os.environ):
         if key.startswith("ZERO_FORGE_") or key in (
-            "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+            "OPENROUTER_API_KEY",
+            "OPENROUTER_BASE_URL",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
         ):
             monkeypatch.delenv(key, raising=False)
     return monkeypatch
 
 
-# --- Defaults -------------------------------------------------------------
-
 def test_defaults(clean_env):
-    s = load_config()
-    assert s.llm.model == "gpt-4o-mini"
-    assert s.llm.temperature == 0.3
-    assert s.llm.max_tokens == 4096
-    assert s.llm.stub_mode is False
-    assert s.workflow.max_repair_attempts == 3
-    assert s.output.dir == "./output"
-    assert s.openrouter_api_key == ""
+    settings = load_config()
+    assert settings.models.smart.model == "gpt-4o"
+    assert settings.models.smart.temperature == 0.3
+    assert settings.models.smart.max_tokens == 4096
+    assert settings.models.tool.model == "gpt-4o-mini"
+    assert settings.models.tool.temperature == 0.0
+    assert settings.models.tool.max_tokens == 1024
+    assert settings.llm.stub_mode is False
+    assert settings.workflow.max_repair_attempts == 3
+    assert settings.output.dir == "./output"
 
 
 def test_sub_models():
-    llm = LLMConfig()
-    assert llm.model == "gpt-4o-mini"
-    wf = WorkflowConfig()
-    assert wf.max_repair_attempts == 3
-    out = OutputConfig()
-    assert out.dir == "./output"
+    smart = ModelConfig(model="smart", temperature=0.2, max_tokens=8000)
+    tool = ModelConfig(model="tool", temperature=0.0, max_tokens=800)
+    models = ModelsConfig(smart=smart.model_dump(), tool=tool.model_dump())
+    assert models.smart.model == "smart"
+    assert models.tool.model == "tool"
+    assert LLMConfig().stub_mode is False
+    assert WorkflowConfig().max_repair_attempts == 3
+    assert OutputConfig().dir == "./output"
 
 
-# --- YAML loading ---------------------------------------------------------
+def test_yaml_loads_independent_models(tmp_path, clean_env):
+    config_path = tmp_path / "zeroforge.yaml"
+    config_path.write_text(
+        yaml.dump(
+            {
+                "models": {
+                    "smart": {
+                        "provider": "openai",
+                        "model": "smart-model",
+                        "temperature": 0.7,
+                        "max_tokens": 8192,
+                        "base_url": "https://smart.example/v1",
+                    },
+                    "tool": {
+                        "provider": "openrouter",
+                        "model": "tool-model",
+                        "temperature": 0.0,
+                        "max_tokens": 512,
+                        "base_url": "https://tool.example/v1",
+                    },
+                },
+                "workflow": {"max_repair_attempts": 5},
+                "output": {"dir": "/tmp/artifacts"},
+            }
+        )
+    )
+    settings = load_config(config_path)
+    assert settings.models.smart.model == "smart-model"
+    assert settings.models.smart.base_url == "https://smart.example/v1"
+    assert settings.models.tool.model == "tool-model"
+    assert settings.models.tool.base_url == "https://tool.example/v1"
+    assert settings.workflow.max_repair_attempts == 5
+    assert settings.output.dir == "/tmp/artifacts"
 
-def test_yaml_load(tmp_path, clean_env):
-    cfg = tmp_path / "zeroforge.yaml"
-    cfg.write_text(yaml.dump({
-        "llm": {"model": "claude-3-opus", "temperature": 0.7, "max_tokens": 8192},
-        "workflow": {"max_repair_attempts": 5},
-        "output": {"dir": "/tmp/artifacts"},
-    }))
-    s = load_config(cfg)
-    assert s.llm.model == "claude-3-opus"
-    assert s.llm.temperature == 0.7
-    assert s.llm.max_tokens == 8192
-    assert s.workflow.max_repair_attempts == 5
-    assert s.output.dir == "/tmp/artifacts"
+
+def test_yaml_partial_model_uses_role_defaults(tmp_path, clean_env):
+    config_path = tmp_path / "partial.yaml"
+    config_path.write_text(yaml.dump({"models": {"smart": {"model": "custom-smart"}}}))
+    settings = load_config(config_path)
+    assert settings.models.smart.model == "custom-smart"
+    assert settings.models.smart.temperature == 0.3
+    assert settings.models.tool.model == "gpt-4o-mini"
 
 
-def test_yaml_partial(tmp_path, clean_env):
-    """YAML with only some fields should still get defaults for the rest."""
-    cfg = tmp_path / "partial.yaml"
-    cfg.write_text(yaml.dump({"llm": {"model": "gpt-4"}}))
-    s = load_config(cfg)
-    assert s.llm.model == "gpt-4"
-    assert s.llm.temperature == 0.3  # default
-    assert s.workflow.max_repair_attempts == 3  # default
+def test_legacy_yaml_fails_with_migration_message(tmp_path, clean_env):
+    config_path = tmp_path / "legacy.yaml"
+    config_path.write_text(yaml.dump({"llm": {"model": "shared-model"}}))
+    with pytest.raises(ValueError, match="models.smart"):
+        load_config(config_path)
 
 
 def test_yaml_missing_file(clean_env):
@@ -91,83 +120,68 @@ def test_yaml_missing_file(clean_env):
         load_config("/nonexistent/path.yaml")
 
 
-# --- Env overrides --------------------------------------------------------
+def test_role_specific_env_overrides(clean_env, monkeypatch):
+    monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "smart-env")
+    monkeypatch.setenv("ZERO_FORGE_SMART_BASE_URL", "https://smart.env/v1")
+    monkeypatch.setenv("ZERO_FORGE_TOOL_MODEL", "tool-env")
+    monkeypatch.setenv("ZERO_FORGE_TOOL_BASE_URL", "https://tool.env/v1")
+    settings = load_config()
+    assert settings.models.smart.model == "smart-env"
+    assert settings.models.smart.base_url == "https://smart.env/v1"
+    assert settings.models.tool.model == "tool-env"
+    assert settings.models.tool.base_url == "https://tool.env/v1"
 
-def test_env_overrides_model(clean_env, monkeypatch):
-    monkeypatch.setenv("ZERO_FORGE_MODEL", "gpt-4-turbo")
-    s = load_config()
-    assert s.llm.model == "gpt-4-turbo"
+
+def test_legacy_model_env_fails_with_migration_message(clean_env, monkeypatch):
+    monkeypatch.setenv("ZERO_FORGE_MODEL", "shared-model")
+    with pytest.raises(ValueError, match="ZERO_FORGE_SMART"):
+        load_config()
 
 
-def test_env_overrides_output_dir(clean_env, monkeypatch):
+def test_env_overrides_output_and_workflow(clean_env, monkeypatch):
     monkeypatch.setenv("ZERO_FORGE_OUTPUT_DIR", "/tmp/out")
-    s = load_config()
-    assert s.output.dir == "/tmp/out"
-
-
-def test_env_overrides_repair_attempts(clean_env, monkeypatch):
     monkeypatch.setenv("ZERO_FORGE_MAX_REPAIR_ATTEMPTS", "7")
-    s = load_config()
-    assert s.workflow.max_repair_attempts == 7
-
-
-def test_env_overrides_temperature(clean_env, monkeypatch):
-    monkeypatch.setenv("ZERO_FORGE_LLM_TEMPERATURE", "0.9")
-    s = load_config()
-    assert s.llm.temperature == 0.9
+    settings = load_config()
+    assert settings.output.dir == "/tmp/out"
+    assert settings.workflow.max_repair_attempts == 7
 
 
 def test_env_enables_explicit_stub_mode(clean_env, monkeypatch):
     monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
-    s = load_config()
-    assert s.llm.stub_mode is True
+    assert load_config().llm.stub_mode is True
 
 
 def test_env_api_keys(clean_env, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-123")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai-456")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-789")
-    s = load_config()
-    assert s.openrouter_api_key == "sk-or-123"
-    assert s.openai_api_key == "sk-oai-456"
-    assert s.anthropic_api_key == "sk-ant-789"
+    settings = load_config()
+    assert settings.openrouter_api_key == "sk-or-123"
+    assert settings.openai_api_key == "sk-oai-456"
+    assert settings.anthropic_api_key == "sk-ant-789"
 
-
-def test_env_overrides_yaml(tmp_path, clean_env, monkeypatch):
-    """Env vars should take priority over YAML values."""
-    cfg = tmp_path / "zeroforge.yaml"
-    cfg.write_text(yaml.dump({"llm": {"model": "yaml-model"}}))
-    monkeypatch.setenv("ZERO_FORGE_MODEL", "env-model")
-    s = load_config(cfg)
-    assert s.llm.model == "env-model"
-
-
-# --- Singleton ------------------------------------------------------------
 
 def test_singleton_caching(clean_env):
-    s1 = get_settings()
-    s2 = get_settings()
-    assert s1 is s2
+    first = get_settings()
+    second = get_settings()
+    assert first is second
 
 
-def test_singleton_reload(clean_env, monkeypatch):
-    s1 = get_settings()
-    monkeypatch.setenv("ZERO_FORGE_MODEL", "new-model")
-    s2 = get_settings(reload=True)
-    assert s2.llm.model == "new-model"
-    assert s1 is not s2
+def test_singleton_reload_uses_role_override(clean_env, monkeypatch):
+    first = get_settings()
+    monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "new-smart-model")
+    second = get_settings(reload=True)
+    assert second.models.smart.model == "new-smart-model"
+    assert first is not second
 
 
 def test_reset(clean_env):
-    s1 = get_settings()
+    first = get_settings()
     reset_settings()
-    s2 = get_settings()
-    assert s1 is not s2
+    second = get_settings()
+    assert first is not second
 
-
-# --- Default path search --------------------------------------------------
 
 def test_default_config_paths_exist():
-    """DEFAULT_CONFIG_PATHS should be a non-empty list."""
     assert isinstance(DEFAULT_CONFIG_PATHS, list)
-    assert len(DEFAULT_CONFIG_PATHS) > 0
+    assert DEFAULT_CONFIG_PATHS

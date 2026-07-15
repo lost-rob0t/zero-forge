@@ -9,8 +9,22 @@ from ..schemas import (
     CollectedContext,
     ValidationResult,
     VulnerabilityInput,
-    WorkflowError,
 )
+from .llm import (
+    LLMCallError,
+    LLMConfigurationError,
+    LLMProviderError,
+    LLMResponseError,
+    call_model,
+    resolve_model,
+)
+
+__all__ = [
+    "LLMCallError",
+    "LLMConfigurationError",
+    "LLMProviderError",
+    "LLMResponseError",
+]
 
 SYSTEM_PROMPT = """\
 You are a security research expert specializing in exploit development.
@@ -36,62 +50,6 @@ When writing a Metasploit module:
 
 Always output the complete module code in a single code block.
 """
-
-
-class LLMCallError(RuntimeError):
-    """Base error for a failed LLM generation attempt."""
-
-    code = "llm_call_error"
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        provider: str,
-        model: str,
-        retryable: bool,
-        attempt: int = 1,
-        max_attempts: int = 1,
-    ) -> None:
-        self.provider = provider
-        self.model = model
-        self.retryable = retryable
-        self.attempt = attempt
-        self.max_attempts = max_attempts
-        detail = (
-            f"{message} (provider={provider}, model={model}, "
-            f"attempt={attempt}/{max_attempts}, retryable={str(retryable).lower()})"
-        )
-        super().__init__(detail)
-
-    def as_workflow_error(self) -> WorkflowError:
-        return WorkflowError(
-            code=self.code,
-            message=str(self),
-            provider=self.provider,
-            model=self.model,
-            retryable=self.retryable,
-            attempt=self.attempt,
-            max_attempts=self.max_attempts,
-        )
-
-
-class LLMConfigurationError(LLMCallError):
-    """Raised when generation is requested without a configured provider."""
-
-    code = "llm_configuration_error"
-
-
-class LLMProviderError(LLMCallError):
-    """Raised when LiteLLM or the selected provider fails."""
-
-    code = "llm_provider_error"
-
-
-class LLMResponseError(LLMCallError):
-    """Raised when a provider returns an unusable response."""
-
-    code = "llm_response_error"
 
 
 def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> str:
@@ -161,110 +119,21 @@ def _extract_code_block(text: str) -> str:
 
 
 def _resolve_provider() -> tuple[str | None, str, dict[str, str]]:
-    """Resolve which LLM provider to use and return (api_key, model, extra_kwargs).
-
-    Provider priority: OPENROUTER > OPENAI > ANTHROPIC.
-    """
     cfg = get_settings()
-    or_key = cfg.openrouter_api_key
-    openai_key = cfg.openai_api_key
-    anthropic_key = cfg.anthropic_api_key
-    model = cfg.llm.model
-    extra_kwargs: dict[str, str] = {}
-
-    if or_key:
-        # Ensure model has openrouter/ prefix for LiteLLM routing
-        if not model.startswith("openrouter/"):
-            model = f"openrouter/{model}"
-        # Optional custom base URL (e.g. self-hosted OpenRouter-compatible endpoint)
-        if cfg.llm.openrouter_base_url:
-            extra_kwargs["api_base"] = cfg.llm.openrouter_base_url
-        return or_key, model, extra_kwargs
-
-    if openai_key:
-        return openai_key, model, extra_kwargs
-
-    if anthropic_key:
-        if not model.startswith("anthropic/"):
-            model = f"anthropic/{model}"
-        return anthropic_key, model, extra_kwargs
-
-    return None, model, extra_kwargs
+    resolved = resolve_model("smart", cfg.models.smart)
+    return resolved.api_key, resolved.model, resolved.extra_kwargs
 
 
 def _provider_name() -> str:
     cfg = get_settings()
-    if cfg.openrouter_api_key:
-        return "openrouter"
-    if cfg.openai_api_key:
-        return "openai"
-    if cfg.anthropic_api_key:
-        return "anthropic"
-    return "none"
-
-
-def _is_retryable_provider_error(exc: Exception) -> bool:
-    name = type(exc).__name__.lower()
-    return any(
-        marker in name
-        for marker in ("timeout", "ratelimit", "connection", "serviceunavailable")
-    )
+    return resolve_model("smart", cfg.models.smart).provider
 
 
 def _call_llm(system_prompt: str, user_prompt: str) -> str:
     cfg = get_settings()
     if cfg.llm.stub_mode:
         return _stub_metasploit_module()
-
-    api_key, model, extra_kwargs = _resolve_provider()
-    provider = _provider_name()
-    if not api_key:
-        raise LLMConfigurationError(
-            "No LLM API key configured and stub mode is disabled",
-            provider=provider,
-            model=model,
-            retryable=False,
-        )
-
-    try:
-        import litellm
-
-        response = litellm.completion(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=cfg.llm.temperature,
-            max_tokens=cfg.llm.max_tokens,
-            **extra_kwargs,
-        )
-    except Exception as exc:
-        raise LLMProviderError(
-            f"LLM request failed with {type(exc).__name__}",
-            provider=provider,
-            model=model,
-            retryable=_is_retryable_provider_error(exc),
-        ) from exc
-
-    try:
-        content = response.choices[0].message.content
-    except (AttributeError, IndexError, KeyError, TypeError) as exc:
-        raise LLMResponseError(
-            "LLM response did not contain a message",
-            provider=provider,
-            model=model,
-            retryable=False,
-        ) from exc
-
-    if not isinstance(content, str) or not content.strip():
-        raise LLMResponseError(
-            "LLM response contained empty message content",
-            provider=provider,
-            model=model,
-            retryable=False,
-        )
-    return content
+    return call_model("smart", cfg.models.smart, system_prompt, user_prompt)
 
 
 def _stub_metasploit_module() -> str:
@@ -330,7 +199,8 @@ def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext)
         content=code,
         filename=f"{context.cve_id.lower().replace('-', '_')}_exploit.rb",
         metadata={
-            "model": cfg.llm.model,
+            "model": cfg.models.smart.model,
+            "model_role": "smart",
             "cve_id": context.cve_id,
             "stub": cfg.llm.stub_mode,
         },

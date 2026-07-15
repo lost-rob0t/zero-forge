@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from zero_forge.agents.smart_agent import LLMProviderError
+from zero_forge.agents.smart_agent import LLMConfigurationError, LLMProviderError
 from zero_forge.schemas import CollectedContext, VulnerabilityInput, WorkflowState
 from zero_forge.tools.validator import ValidatorRuntimeUnavailable
-from zero_forge.workflow import build_workflow, generate_artifact_node, run_workflow
+from zero_forge.workflow import (
+    build_workflow,
+    collect_context_node,
+    generate_artifact_node,
+    run_workflow,
+)
 
 
 def _input() -> VulnerabilityInput:
@@ -113,3 +118,24 @@ def test_provider_failure_becomes_structured_workflow_error(monkeypatch):
     assert patch["failure"].provider == "openai"
     assert patch["failure"].model == "gpt-4o"
     assert patch["failure"].retryable is True
+
+
+def test_tool_model_configuration_failure_is_role_specific(monkeypatch):
+    failure = LLMConfigurationError(
+        "No API key configured for the selected model provider",
+        role="tool",
+        provider="openrouter",
+        model="openrouter/cheap-tool-caller",
+        retryable=False,
+    )
+    monkeypatch.setattr(
+        "zero_forge.workflow.ToolAgent.collect_context",
+        lambda *_args: (_ for _ in ()).throw(failure),
+    )
+    state = WorkflowState(vuln_input=_input())
+
+    patch = collect_context_node(state)
+
+    assert patch["status"] == "failed"
+    assert patch["failure"].role == "tool"
+    assert patch["failure"].model == "openrouter/cheap-tool-caller"
