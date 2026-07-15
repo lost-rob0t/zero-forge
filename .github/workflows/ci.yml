@@ -109,8 +109,8 @@ jobs:
 
       - name: Verify litellm version is below 1.92
         run: |
-          uv run python -c "import litellm; assert litellm.__version__ < '1.92', f'Expected litellm < 1.92 on Python 3.14, got {litellm.__version__}'"
-          echo "litellm version: $(uv run python -c 'import litellm; print(litellm.__version__)')"
+          uv run python -c "from importlib.metadata import version; v = version('litellm'); assert v < '1.92', f'Expected litellm < 1.92 on Python 3.14, got {v}'"
+          echo "litellm version: $(uv run python -c 'from importlib.metadata import version; print(version("litellm"))')"
 
       - name: Smoke import
         run: uv run python -c "import zero_forge; print('zero_forge imported successfully')"
