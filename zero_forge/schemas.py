@@ -79,6 +79,7 @@ class ToolRequest(StrictSchema):
     objective: str = Field(min_length=1)
     allowed_tools: list[str] = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
+    locked_arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolCall(StrictSchema):
