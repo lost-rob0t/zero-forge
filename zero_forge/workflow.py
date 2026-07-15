@@ -128,7 +128,13 @@ def repair_artifact_node(state: WorkflowState) -> dict[str, Any]:
     repair_context = state.context.model_copy()
     repair_context.extra_notes += f"\nRepair attempt #{state.repair_attempts + 1}"
     try:
-        repaired = repair_artifact(state.artifact, state.validation, repair_context)
+        repaired = repair_artifact(
+            state.artifact,
+            state.validation,
+            repair_context,
+            attempt=state.repair_attempts + 1,
+            max_attempts=state.max_repair_attempts,
+        )
     except LLMCallError as exc:
         return {
             "error": str(exc),
