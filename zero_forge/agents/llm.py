@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..config import ModelConfig, Settings, get_settings
+from ..logging_config import get_logger
 from ..schemas import WorkflowError
+
+logger = get_logger(__name__)
+
+
+
 
 
 @dataclass(frozen=True)
@@ -151,6 +157,13 @@ def call_model(
     if additional_messages:
         messages.extend(additional_messages)
 
+    logger.trace(  # type: ignore[attr-defined]
+        "LLM request role=%s provider=%s model=%s attempt=%d/%d "
+        "system_prompt=%r user_prompt=%.500r",
+        role, resolved.provider, resolved.model, attempt, max_attempts,
+        system_prompt, user_prompt,
+    )
+
     try:
         import litellm
 
@@ -163,6 +176,12 @@ def call_model(
             **resolved.extra_kwargs,
         )
     except Exception as exc:
+        logger.error(
+            "LLM request failed role=%s provider=%s model=%s "
+            "error_type=%s retryable=%s",
+            role, resolved.provider, resolved.model,
+            type(exc).__name__, _is_retryable_provider_error(exc),
+        )
         raise LLMProviderError(
             f"LLM request failed with {type(exc).__name__}",
             role=role,
@@ -176,6 +195,10 @@ def call_model(
     try:
         content = response.choices[0].message.content
     except (AttributeError, IndexError, KeyError, TypeError) as exc:
+        logger.error(
+            "LLM response missing message role=%s provider=%s model=%s",
+            role, resolved.provider, resolved.model,
+        )
         raise LLMResponseError(
             "LLM response did not contain a message",
             role=role,
@@ -187,6 +210,10 @@ def call_model(
         ) from exc
 
     if not isinstance(content, str) or not content.strip():
+        logger.error(
+            "LLM response empty role=%s provider=%s model=%s",
+            role, resolved.provider, resolved.model,
+        )
         raise LLMResponseError(
             "LLM response contained empty message content",
             role=role,
@@ -196,4 +223,8 @@ def call_model(
             attempt=attempt,
             max_attempts=max_attempts,
         )
+    logger.trace(  # type: ignore[attr-defined]
+        "LLM response role=%s provider=%s model=%s content=%.1000r",
+        role, resolved.provider, resolved.model, content,
+    )
     return content

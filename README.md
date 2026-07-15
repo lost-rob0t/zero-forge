@@ -111,6 +111,8 @@ All settings can be overridden via environment variables (take priority over YAM
 | `ZERO_FORGE_TOOL_MAX_TOKENS` | `models.tool.max_tokens` | `1024` |
 | `ZERO_FORGE_TOOL_BASE_URL` | `models.tool.base_url` | `""` |
 | `ZERO_FORGE_STUB_MODE` | `llm.stub_mode` | `false` |
+| `ZERO_FORGE_LOG_LEVEL` | `logging.level` | `INFO` |
+| `ZERO_FORGE_LOG_MODEL_IO_LEVEL` | `logging.model_io_level` | `TRACE` |
 | `ZERO_FORGE_OUTPUT_DIR` | `output.dir` | `./output` |
 | `ZERO_FORGE_MAX_REPAIR_ATTEMPTS` | `workflow.max_repair_attempts` | `3` |
 | `OPENROUTER_API_KEY` | `openrouter_api_key` | `""` |

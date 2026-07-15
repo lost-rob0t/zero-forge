@@ -23,6 +23,10 @@ models:
 llm:
   stub_mode: false              # placeholder mode; never completes or saves
 
+logging:
+  level: "INFO"                 # TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL
+  model_io_level: "TRACE"       # minimum level for model I/O (prompts/responses)
+
 workflow:
   max_repair_attempts: 3
   unsafe_source_collection: false

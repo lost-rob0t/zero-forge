@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import get_settings
+from .logging_config import setup_logging_from_settings
 from .schemas import VulnerabilityInput
 from .workflow import run_workflow
 
@@ -44,6 +45,7 @@ def generate(
 
     get_settings()
 
+    setup_logging_from_settings()
     console.print(f"[bold]ZeroForge[/] — generating artifact for {cve_id}")
 
     def _read(path: str) -> str:
