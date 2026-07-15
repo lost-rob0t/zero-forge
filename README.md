@@ -51,24 +51,28 @@ ZeroForge requires Python 3.12 or newer. Metasploit module validation also
 requires Ruby 3.3.8; validation fails closed when Ruby is unavailable.
 
 ```bash
-# Install
-pip install -e .
+# Create the locked development environment
+uv sync --locked --extra dev
 
 # Generate an artifact (requires a configured provider key)
-python -m zero_forge.cli generate --cve CVE-2021-44228
+uv run python -m zero_forge.cli generate --cve CVE-2021-44228
 
 # With source code and PoC
-python -m zero_forge.cli generate --cve CVE-2021-44228 --source /path/to/code --poc poc.txt
+uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --source /path/to/code --poc poc.txt
 
 # With a custom config file
-python -m zero_forge.cli generate --cve CVE-2021-44228 --config my_config.yaml
+uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --config my_config.yaml
 
 # List available tools
-python -m zero_forge.cli tools
+uv run python -m zero_forge.cli tools
 
 # Validate an existing module
-python -m zero_forge.cli validate exploit.rb
+uv run python -m zero_forge.cli validate exploit.rb
 ```
+
+`uv sync --locked --extra dev` creates `.venv/` from the committed `uv.lock`
+without changing dependency resolution. Package consumers can still install ZeroForge
+with `pip install .`.
 
 ## Configuration
 
@@ -172,16 +176,8 @@ Set `ZERO_FORGE_STUB_MODE=true` only for local plumbing tests. The generated pla
 ## Testing
 
 ```bash
-pytest tests/ -v
+uv run pytest tests/ -v
 ```
-
-## Project Documentation
-
-- [Architecture](docs/architecture.md)
-- [Maintainer operations](docs/maintenance.md)
-- [Wiki home](wiki/Home.md)
-- [Org issue tracker and run ledger](wiki/issues.org)
-- [Research index](research/README.md)
 
 ## License
 

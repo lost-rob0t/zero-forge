@@ -28,7 +28,7 @@ ZeroForge is an LLM-based exploit-development harness that generates security ar
 ## Project
 
 - Python 3.12+; LangGraph, Pydantic v2, Typer, Rich, LiteLLM, and PyYAML.
-- Install: `pip install -e .` or `pip install -e ".[dev]"`.
+- Install: `uv sync --locked --extra dev`; run project commands with `uv run`.
 - CLI: `zero-forge` or `python -m zero_forge.cli`.
 - Human-facing documentation belongs in `README.md`.
 
@@ -70,10 +70,10 @@ ZeroForge is an LLM-based exploit-development harness that generates security ar
 
 ## Verification and Merge Gate
 
-- Targeted: `pytest tests/test_<module>.py -v`
-- Full: `pytest tests/ -v`
-- Static checks: `ruff check .` and `mypy zero_forge`
-- No-key smoke test: `python -m zero_forge.cli generate --cve CVE-2021-44228` must fail without writing an artifact.
+- Targeted: `uv run pytest tests/test_<module>.py -v`
+- Full: `uv run pytest tests/ -v`
+- Static checks: `uv run ruff check .` and `uv run mypy zero_forge`
+- No-key smoke test: `uv run python -m zero_forge.cli generate --cve CVE-2021-44228` must fail without writing an artifact.
 - Confirm artifacts land in configured `output.dir` (default `./output/`).
 - Never merge or enable auto-merge until `lint`, `type-check`, `test (3.12)`, and `test (3.13)` succeed on the current head. Any other state is not a pass; a new head invalidates old results.
 
