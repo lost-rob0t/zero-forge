@@ -21,6 +21,15 @@ class ModelConfig(BaseModel):
     model: str = Field(default="gpt-4o", min_length=1)
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, ge=1)
+    auto_max_tokens: bool = Field(
+        default=True,
+        description="Infer max_tokens from the provider API when unset",
+    )
+    inferred_max_token_cap: int = Field(
+        default=8192,
+        ge=1,
+        description="Upper bound for provider-inferred max_tokens (cost control)",
+    )
     base_url: str = ""
 
     model_config = ConfigDict(extra="forbid")
@@ -117,11 +126,15 @@ _ENV_MAP: dict[str, str] = {
     "ZERO_FORGE_SMART_MODEL": "models.smart.model",
     "ZERO_FORGE_SMART_TEMPERATURE": "models.smart.temperature",
     "ZERO_FORGE_SMART_MAX_TOKENS": "models.smart.max_tokens",
+    "ZERO_FORGE_SMART_AUTO_MAX_TOKENS": "models.smart.auto_max_tokens",
+    "ZERO_FORGE_SMART_INFERRED_MAX_TOKEN_CAP": "models.smart.inferred_max_token_cap",
     "ZERO_FORGE_SMART_BASE_URL": "models.smart.base_url",
     "ZERO_FORGE_TOOL_PROVIDER": "models.tool.provider",
     "ZERO_FORGE_TOOL_MODEL": "models.tool.model",
     "ZERO_FORGE_TOOL_TEMPERATURE": "models.tool.temperature",
     "ZERO_FORGE_TOOL_MAX_TOKENS": "models.tool.max_tokens",
+    "ZERO_FORGE_TOOL_AUTO_MAX_TOKENS": "models.tool.auto_max_tokens",
+    "ZERO_FORGE_TOOL_INFERRED_MAX_TOKEN_CAP": "models.tool.inferred_max_token_cap",
     "ZERO_FORGE_TOOL_BASE_URL": "models.tool.base_url",
     "ZERO_FORGE_STUB_MODE": "llm.stub_mode",
     "ZERO_FORGE_LOG_LEVEL": "logging.level",

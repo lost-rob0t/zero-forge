@@ -122,11 +122,15 @@ All settings can be overridden via environment variables (take priority over YAM
 | `ZERO_FORGE_SMART_MODEL` | `models.smart.model` | `gpt-4o` |
 | `ZERO_FORGE_SMART_TEMPERATURE` | `models.smart.temperature` | `0.3` |
 | `ZERO_FORGE_SMART_MAX_TOKENS` | `models.smart.max_tokens` | `4096` |
+| `ZERO_FORGE_SMART_AUTO_MAX_TOKENS` | `models.smart.auto_max_tokens` | `true` |
+| `ZERO_FORGE_SMART_INFERRED_MAX_TOKEN_CAP` | `models.smart.inferred_max_token_cap` | `8192` |
 | `ZERO_FORGE_SMART_BASE_URL` | `models.smart.base_url` | `""` |
 | `ZERO_FORGE_TOOL_PROVIDER` | `models.tool.provider` | `auto` |
 | `ZERO_FORGE_TOOL_MODEL` | `models.tool.model` | `gpt-4o-mini` |
 | `ZERO_FORGE_TOOL_TEMPERATURE` | `models.tool.temperature` | `0.0` |
 | `ZERO_FORGE_TOOL_MAX_TOKENS` | `models.tool.max_tokens` | `1024` |
+| `ZERO_FORGE_TOOL_AUTO_MAX_TOKENS` | `models.tool.auto_max_tokens` | `true` |
+| `ZERO_FORGE_TOOL_INFERRED_MAX_TOKEN_CAP` | `models.tool.inferred_max_token_cap` | `8192` |
 | `ZERO_FORGE_TOOL_BASE_URL` | `models.tool.base_url` | `""` |
 | `ZERO_FORGE_STUB_MODE` | `llm.stub_mode` | `false` |
 | `ZERO_FORGE_LOG_LEVEL` | `logging.level` | `INFO` |
@@ -175,6 +179,15 @@ or patch.
 ZAP active rules must clone and mutate a request, send a non-destructive probe, inspect
 the response, and raise an evidence-backed alert. ZAP passive rules fail validation if
 they attempt to send traffic, mutate parameters, or use a network API.
+
+### Auto max_tokens inference
+
+When `auto_max_tokens` is `true` (the default), ZeroForge queries the provider API at call time to infer the model's `max_completion_tokens` and uses `min(inferred, inferred_max_token_cap)` as the effective `max_tokens`. This prevents silent token exhaustion on reasoning models like GLM-5.2 that support 131072 completion tokens but were previously capped at 4096.
+
+- If the provider API is unreachable or returns no data, ZeroForge falls back to the configured `max_tokens` and logs a debug message.
+- Setting `ZERO_FORGE_SMART_MAX_TOKENS` or `ZERO_FORGE_TOOL_MAX_TOKENS` explicitly skips auto-inference for that role.
+- Set `auto_max_tokens: false` to disable inference entirely and always use the static `max_tokens` default.
+- Adjust `inferred_max_token_cap` (default 8192) to raise or lower the cost-control ceiling.
 
 ### OpenRouter (preferred)
 

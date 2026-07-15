@@ -196,6 +196,45 @@ def test_reset(clean_env):
     assert first is not second
 
 
+def test_auto_max_tokens_defaults(clean_env):
+    settings = load_config()
+    assert settings.models.smart.auto_max_tokens is True
+    assert settings.models.tool.auto_max_tokens is True
+    assert settings.models.smart.inferred_max_token_cap == 8192
+    assert settings.models.tool.inferred_max_token_cap == 8192
+
+
+def test_auto_max_tokens_env_overrides(clean_env, monkeypatch):
+    monkeypatch.setenv("ZERO_FORGE_SMART_AUTO_MAX_TOKENS", "false")
+    monkeypatch.setenv("ZERO_FORGE_TOOL_AUTO_MAX_TOKENS", "false")
+    monkeypatch.setenv("ZERO_FORGE_SMART_INFERRED_MAX_TOKEN_CAP", "16384")
+    monkeypatch.setenv("ZERO_FORGE_TOOL_INFERRED_MAX_TOKEN_CAP", "2048")
+    settings = load_config()
+    assert settings.models.smart.auto_max_tokens is False
+    assert settings.models.tool.auto_max_tokens is False
+    assert settings.models.smart.inferred_max_token_cap == 16384
+    assert settings.models.tool.inferred_max_token_cap == 2048
+
+
+def test_yaml_auto_max_tokens(tmp_path, clean_env):
+    config_path = tmp_path / "zeroforge.yaml"
+    config_path.write_text(
+        yaml.dump(
+            {
+                "models": {
+                    "smart": {"auto_max_tokens": False, "inferred_max_token_cap": 2048},
+                    "tool": {"auto_max_tokens": False, "inferred_max_token_cap": 1024},
+                }
+            }
+        )
+    )
+    settings = load_config(config_path)
+    assert settings.models.smart.auto_max_tokens is False
+    assert settings.models.smart.inferred_max_token_cap == 2048
+    assert settings.models.tool.auto_max_tokens is False
+    assert settings.models.tool.inferred_max_token_cap == 1024
+
+
 def test_default_config_paths_exist():
     assert isinstance(DEFAULT_CONFIG_PATHS, list)
     assert DEFAULT_CONFIG_PATHS

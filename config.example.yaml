@@ -11,6 +11,8 @@ models:
     model: "gpt-4o"             # reasoning and artifact-writing model
     temperature: 0.3
     max_tokens: 4096
+    auto_max_tokens: true       # infer max_tokens from provider API
+    inferred_max_token_cap: 8192 # upper bound for inferred max_tokens
     base_url: ""                # optional LiteLLM-compatible endpoint
 
   tool:
@@ -18,6 +20,8 @@ models:
     model: "gpt-4o-mini"        # cheap/fast registered-tool caller
     temperature: 0.0
     max_tokens: 1024
+    auto_max_tokens: true       # infer max_tokens from provider API
+    inferred_max_token_cap: 8192 # upper bound for inferred max_tokens
     base_url: ""                # may differ from the Smart model endpoint
 
 llm:
