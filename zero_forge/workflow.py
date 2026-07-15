@@ -10,8 +10,12 @@ from langgraph.graph.state import CompiledStateGraph
 from .agents.smart_agent import LLMCallError, generate_artifact, repair_artifact
 from .agents.tool_agent import ToolAgent, ToolAgentError
 from .logging_config import get_logger
-from .schemas import WorkflowError, WorkflowState
-from .tools.validator import ValidatorRuntimeUnavailable, require_ruby_runtime
+from .schemas import ArtifactType, WorkflowError, WorkflowState
+from .tools.validator import (
+    ValidatorRuntimeUnavailable,
+    require_node_runtime,
+    require_ruby_runtime,
+)
 
 logger = get_logger(__name__)
 
@@ -265,7 +269,10 @@ def run_workflow(vuln_input) -> WorkflowState:
         max_repair_attempts=get_settings().workflow.max_repair_attempts,
     )
     try:
-        require_ruby_runtime()
+        if vuln_input.artifact_type == ArtifactType.METASPLOIT:
+            require_ruby_runtime()
+        else:
+            require_node_runtime()
     except ValidatorRuntimeUnavailable as exc:
         message = str(exc)
         return initial_state.model_copy(

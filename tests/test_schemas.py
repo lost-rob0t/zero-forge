@@ -21,6 +21,15 @@ def test_vulnerability_input_minimal():
     assert vi.cve_id == "CVE-2021-44228"
     assert vi.poc_text == ""
     assert vi.source_path is None
+    assert vi.artifact_type == ArtifactType.METASPLOIT
+
+
+def test_vulnerability_input_accepts_zap_artifact_type():
+    vi = VulnerabilityInput(
+        cve_id="CVE-2021-44228",
+        artifact_type="zap_passive_scan",
+    )
+    assert vi.artifact_type == ArtifactType.ZAP_PASSIVE
 
 
 def test_vulnerability_input_full():

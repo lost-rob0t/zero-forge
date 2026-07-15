@@ -40,3 +40,5 @@ def test_default_registry():
     assert "search_code" in names
     assert "git_diff_inspect" in names
     assert "validate_metasploit" in names
+    assert "validate_zap_active_scan" in names
+    assert "validate_zap_passive_scan" in names

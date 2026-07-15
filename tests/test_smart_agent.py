@@ -12,6 +12,8 @@ from zero_forge.agents.smart_agent import (
     LLMConfigurationError,
     LLMProviderError,
     LLMResponseError,
+    _build_context_prompt,
+    _build_repair_prompt,
     _call_llm,
     _extract_code_block,
     _resolve_provider,
@@ -52,6 +54,45 @@ def test_extract_code_block_generic():
 
 def test_extract_code_block_no_fence():
     assert _extract_code_block("just raw code") == "just raw code"
+
+
+def test_extract_javascript_code_block():
+    text = "before\n```javascript\nfunction scan() {}\n```\nafter"
+    result = _extract_code_block(text, ArtifactType.ZAP_ACTIVE)
+    assert result == "function scan() {}"
+
+
+def test_active_prompt_includes_only_active_examples():
+    prompt = _build_context_prompt(
+        VulnerabilityInput(
+            cve_id="CVE-2021-44228",
+            artifact_type=ArtifactType.ZAP_ACTIVE,
+        ),
+        _context(),
+    )
+
+    assert "function scan(as, msg, param, value)" in prompt
+    assert "as.sendAndReceive" in prompt
+    assert "MetasploitModule" not in prompt
+    assert "function scan(ps, msg, src)" not in prompt
+
+
+def test_passive_repair_prompt_reinforces_no_network_rule():
+    artifact = Artifact(
+        artifact_type=ArtifactType.ZAP_PASSIVE,
+        content="function scan(ps, msg, src) {}",
+        filename="passive.js",
+    )
+    validation = ValidationResult(
+        is_valid=False,
+        errors=["Passive rules must not send requests"],
+    )
+
+    prompt = _build_repair_prompt(artifact, validation)
+
+    assert "Never call sendAndReceive" in prompt
+    assert "function scan(ps, msg, src)" in prompt
+    assert "Passive rules must not send requests" in prompt
 
 
 def test_missing_credentials_fail_closed(monkeypatch):
@@ -184,6 +225,31 @@ def test_explicit_stub_mode_marks_artifact(monkeypatch):
     assert artifact.artifact_type == ArtifactType.METASPLOIT
     assert "MetasploitModule" in artifact.content
     assert artifact.metadata["stub"] is True
+
+
+@pytest.mark.parametrize(
+    ("artifact_type", "suffix", "signature"),
+    [
+        (ArtifactType.ZAP_ACTIVE, "_zap_active.js", "function scan(as, msg, param, value)"),
+        (ArtifactType.ZAP_PASSIVE, "_zap_passive.js", "function scan(ps, msg, src)"),
+    ],
+)
+def test_stub_generation_preserves_zap_artifact_type(
+    monkeypatch, artifact_type, suffix, signature
+):
+    monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
+
+    artifact = generate_artifact(
+        VulnerabilityInput(
+            cve_id="CVE-2021-44228",
+            artifact_type=artifact_type,
+        ),
+        _context(),
+    )
+
+    assert artifact.artifact_type == artifact_type
+    assert artifact.filename.endswith(suffix)
+    assert signature in artifact.content
 
 
 def test_auth_failure_is_not_replaced_by_stub(monkeypatch):

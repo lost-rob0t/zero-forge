@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import typer
 from rich.console import Console
@@ -10,7 +11,7 @@ from rich.table import Table
 
 from .config import get_settings
 from .logging_config import setup_logging_from_settings
-from .schemas import VulnerabilityInput
+from .schemas import ArtifactType, VulnerabilityInput, WorkflowState
 from .workflow import run_workflow
 
 app = typer.Typer(
@@ -20,6 +21,100 @@ app = typer.Typer(
 )
 console = Console()
 
+_ARTIFACT_TYPE_OPTION = cast(
+    ArtifactType,
+    typer.Option(
+        ArtifactType.METASPLOIT,
+        "--type",
+        "-t",
+        help="Artifact type to generate (ignored when --all is set)",
+        case_sensitive=False,
+    ),
+)
+
+
+def _build_vuln_input(
+    cve_id: str,
+    artifact_type: ArtifactType,
+    poc_text: str,
+    writeup_text: str,
+    source_path: str,
+    patch_diff: str,
+) -> VulnerabilityInput:
+    return VulnerabilityInput(
+        cve_id=cve_id,
+        artifact_type=artifact_type,
+        poc_text=poc_text,
+        writeup_text=writeup_text,
+        source_path=source_path or None,
+        patch_diff=patch_diff,
+    )
+
+
+def _read(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8", errors="replace") if path else ""
+
+
+def _apply_env_overrides(*, output_dir: str, unsafe: bool, config_file: str) -> None:
+    if config_file:
+        import os
+
+        os.environ["ZERO_FORGE_CONFIG_PATH"] = config_file
+        get_settings(reload=True)
+
+    get_settings()
+
+    if unsafe:
+        import os
+
+        os.environ["ZERO_FORGE_UNSAFE_SOURCE"] = "true"
+        get_settings(reload=True)
+
+    if output_dir:
+        import os
+
+        os.environ["ZERO_FORGE_OUTPUT_DIR"] = output_dir
+        get_settings(reload=True)
+
+
+def _print_result_table(
+    results: list[tuple[ArtifactType, WorkflowState]],
+) -> None:
+    """Print a combined results table for one or more artifact types."""
+    table = Table(title="ZeroForge Results")
+    table.add_column("Artifact Type", style="cyan")
+    table.add_column("Status")
+    table.add_column("Valid")
+    table.add_column("Output")
+    table.add_column("Errors")
+
+    for artifact_type, result in results:
+        valid = (
+            str(result.validation.is_valid)
+            if result.validation
+            else "—"
+        )
+        errors = (
+            "\n".join(result.validation.errors)
+            if result.validation and result.validation.errors
+            else (result.error or "")
+        )
+        table.add_row(
+            artifact_type.value,
+            result.status,
+            valid,
+            result.output_path or "—",
+            errors or "—",
+        )
+
+    console.print(table)
+
+    for artifact_type, result in results:
+        if result.output_path:
+            console.print(
+                f"[green]✓[/] {artifact_type.value}: {result.output_path}"
+            )
+
 
 @app.command()
 def generate(
@@ -28,6 +123,12 @@ def generate(
         "--cve",
         "-c",
         help="CVE identifier (e.g. CVE-2021-44228). Optional for source-only analysis.",
+    ),
+    artifact_type: ArtifactType = _ARTIFACT_TYPE_OPTION,
+    all_types: bool = typer.Option(
+        False,
+        "--all",
+        help="Generate artifacts for every supported type (overrides --type)",
     ),
     poc_file: str = typer.Option("", "--poc", "-p", help="Path to proof-of-concept file"),
     writeup_file: str = typer.Option("", "--writeup", "-w", help="Path to vulnerability write-up"),
@@ -41,66 +142,40 @@ def generate(
         help="Allow reading secrets and following symlinks during source collection",
     ),
 ) -> None:
-    """Generate a security artifact from vulnerability context."""
-    # Load config if --config specified, refreshing the singleton
-    if config_file:
-        import os
-        os.environ["ZERO_FORGE_CONFIG_PATH"] = config_file
-        get_settings(reload=True)
+    """Generate security artifact(s) from vulnerability context.
 
-    get_settings()
-
+    Use --all to generate every supported artifact type for the same CVE.
+    New artifact types can be added by extending the ArtifactType enum,
+    registering an ArtifactProfile, a validator, and example files.
+    """
+    _apply_env_overrides(output_dir=output_dir, unsafe=unsafe, config_file=config_file)
     setup_logging_from_settings()
-    label = cve_id or "source-only analysis (no CVE)"
-    console.print(f"[bold]ZeroForge[/] — generating artifact for {label}")
 
-    def _read(path: str) -> str:
-        return Path(path).read_text(encoding="utf-8", errors="replace") if path else ""
+    label = cve_id or "source-only analysis (no CVE)"
+    console.print(f"[bold]ZeroForge[/] — generating artifact(s) for {label}")
 
     poc_text = _read(poc_file)
     writeup_text = _read(writeup_file)
     patch_diff = _read(patch_file)
 
-    vuln_input = VulnerabilityInput(
-        cve_id=cve_id,
-        poc_text=poc_text,
-        writeup_text=writeup_text,
-        source_path=source_path or None,
-        patch_diff=patch_diff,
-    )
+    types_to_run = list[ArtifactType](ArtifactType) if all_types else [artifact_type]
 
-    # CLI --unsafe enables unsafe source collection via env var
-    if unsafe:
-        import os
-        os.environ["ZERO_FORGE_UNSAFE_SOURCE"] = "true"
-        get_settings(reload=True)
+    results: list[tuple[ArtifactType, WorkflowState]] = []
+    for at in types_to_run:
+        console.print(f"\n[cyan]→ {at.value}[/]")
+        vuln_input = _build_vuln_input(
+            cve_id=cve_id,
+            artifact_type=at,
+            poc_text=poc_text,
+            writeup_text=writeup_text,
+            source_path=source_path,
+            patch_diff=patch_diff,
+        )
+        result = run_workflow(vuln_input)
+        results.append((at, result))
 
-    # CLI --output overrides config; set it via env so config picks it up
-    if output_dir:
-        import os
-        os.environ["ZERO_FORGE_OUTPUT_DIR"] = output_dir
-        get_settings(reload=True)
-
-    result = run_workflow(vuln_input)
-
-    table = Table(title="ZeroForge Results")
-    table.add_column("Field", style="cyan")
-    table.add_column("Value")
-    table.add_row("Status", result.status)
-    table.add_row("CVE", vuln_input.cve_id or "(none)")
-    if result.output_path:
-        table.add_row("Output", result.output_path)
-    if result.validation:
-        table.add_row("Valid", str(result.validation.is_valid))
-        if result.validation.errors:
-            table.add_row("Errors", "\n".join(result.validation.errors))
-    table.add_row("Repair Attempts", str(result.repair_attempts))
-    if result.error:
-        table.add_row("Error", result.error)
-    console.print(table)
-
-    if result.output_path:
-        console.print(f"\n[green]✓ Artifact saved to:[/] {result.output_path}")
+    console.print()
+    _print_result_table(results)
 
 
 @app.command()
@@ -118,7 +193,7 @@ def tools() -> None:
 
 @app.command()
 def validate(
-    file: str = typer.Argument(..., help="Path to Metasploit module file"),
+    file: str = typer.Argument(..., help="Path to artifact file"),
     artifact_type: str = typer.Option("metasploit", "--type", "-t", help="Artifact type"),
 ) -> None:
     """Validate an existing artifact file."""

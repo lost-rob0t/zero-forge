@@ -6,16 +6,17 @@ LLM-based exploit-development harness for security artifact generation.
 
 ZeroForge takes vulnerability context (CVE, PoC, write-up, source code, patch diff) and generates security artifacts for authorized testing:
 
-- **Metasploit exploit modules** (implemented)
-- ZAP active scan rules (planned)
-- ZAP passive scan rules (planned)
+- **Metasploit exploit modules**
+- **ZAP active scan detection rules**
+- **ZAP passive scan detection rules**
 
 ## Architecture
 
 ```
 input CVE + context
   → Tool Agent collects context (CVE lookup, source inspection, git diff)
-  → Smart Agent generates Metasploit module with an LLM
+  → Smart Agent loads bounded examples for the requested artifact type
+  → Smart Agent generates the selected artifact with an LLM
   → Tool Agent validates the artifact
   → Smart Agent repairs errors (loop, max 3 attempts)
   → Save result to filesystem
@@ -33,6 +34,7 @@ zero_forge/
 ├── config.py           # Centralized YAML + env var configuration
 ├── schemas.py          # Pydantic input/state/artifact schemas
 ├── workflow.py         # LangGraph workflow with repair loop
+├── examples.py         # Bounded artifact-specific example loading
 ├── output.py           # Filesystem output
 ├── cli.py              # Typer CLI
 ├── agents/
@@ -42,7 +44,12 @@ zero_forge/
     ├── registry.py      # Tool registry
     ├── cve_lookup.py    # NVD API CVE lookup
     ├── source_inspect.py # Source reading, code search, git diff
-    └── validator.py     # Metasploit module validation
+    └── validator.py     # Metasploit and ZAP artifact validation
+zero_forge/llm_examples/
+├── metasploit/         # Complete Ruby module references
+└── zap/
+    ├── active/         # Active detection-rule references
+    └── passive/        # Passive detection-rule references
 ```
 
 ## Quick Start
@@ -57,6 +64,13 @@ uv sync --locked --extra dev
 # Generate an artifact (requires a configured provider key)
 uv run python -m zero_forge.cli generate --cve CVE-2021-44228
 
+# Generate ZAP detection rules
+uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --type zap_active_scan
+uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --type zap_passive_scan
+
+# Generate all supported artifact types for one CVE
+uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --all
+
 # With source code and PoC
 uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --source /path/to/code --poc poc.txt
 
@@ -68,6 +82,10 @@ uv run python -m zero_forge.cli tools
 
 # Validate an existing module
 uv run python -m zero_forge.cli validate exploit.rb
+
+# Validate ZAP rules
+uv run python -m zero_forge.cli validate active-rule.js --type zap_active_scan
+uv run python -m zero_forge.cli validate passive-rule.js --type zap_passive_scan
 ```
 
 `uv sync --locked --extra dev` creates `.venv/` from the committed `uv.lock`
@@ -138,6 +156,25 @@ print(settings.workflow.max_repair_attempts)  # 3
 ZeroForge supports multiple LLM providers via LiteLLM. Smart and Tool roles have independent provider, model, temperature, token, and base-URL settings. With `provider: auto`, provider priority is **OpenRouter > OpenAI > Anthropic**. Missing credentials, provider errors, malformed Tool calls, disallowed tools, and invalid arguments fail closed with role/provider/model context.
 
 Legacy single-model YAML such as `llm.model` and environment variables such as `ZERO_FORGE_MODEL` are rejected with a migration error. Configure both roles explicitly instead of silently sharing one model.
+
+### Artifact examples and contracts
+
+The Smart Agent injects only examples matching the requested artifact type. Files are
+sorted, loaded whole, and bounded by both count and total character budget; oversized
+files are skipped instead of truncated. Initial generation and every repair attempt
+also receive an explicit structural contract.
+
+The examples in `zero_forge/llm_examples/` are original reference artifacts informed by the
+[ZAP active and passive script templates](https://github.com/zaproxy/community-scripts/tree/main)
+and the
+[Metasploit module development guides](https://docs.metasploit.com/docs/development/developing-modules/guides/get-started-writing-an-exploit.html).
+They use fictional targets where target-specific exploit behavior is needed. Generated
+artifacts must replace those details with evidence from the supplied CVE, PoC, source,
+or patch.
+
+ZAP active rules must clone and mutate a request, send a non-destructive probe, inspect
+the response, and raise an evidence-backed alert. ZAP passive rules fail validation if
+they attempt to send traffic, mutate parameters, or use a network API.
 
 ### OpenRouter (preferred)
 

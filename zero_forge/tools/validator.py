@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+import yaml
+
 META_REQUIRED_KEYS = {
     "Name": "Module name",
     "Description": "Module description",
@@ -24,6 +26,11 @@ RUBY_UNAVAILABLE_ERROR = (
     f"Ruby {RUBY_VERSION} is required for Metasploit validation but was not found "
     "on PATH; install Ruby 3.3.8 and retry"
 )
+NODE_TIMEOUT = 10.0
+NODE_UNAVAILABLE_ERROR = (
+    "Node.js is required for ZAP JavaScript syntax validation but was not found "
+    "on PATH; install Node.js and retry"
+)
 
 
 class ValidatorRuntimeUnavailable(RuntimeError):
@@ -36,6 +43,59 @@ def require_ruby_runtime(ruby_executable: str = "ruby") -> str:
     if path is None:
         raise ValidatorRuntimeUnavailable(RUBY_UNAVAILABLE_ERROR)
     return path
+
+
+def require_node_runtime(node_executable: str = "node") -> str:
+    """Return the Node.js executable path or raise one actionable preflight error."""
+    path = shutil.which(node_executable)
+    if path is None:
+        raise ValidatorRuntimeUnavailable(NODE_UNAVAILABLE_ERROR)
+    return path
+
+
+def _javascript_syntax_failure(content: str) -> dict[str, Any] | None:
+    """Return a fail-closed validation result when Node.js rejects JavaScript syntax."""
+    try:
+        node = require_node_runtime()
+        result = subprocess.run(
+            [node, "--check"],
+            input=content,
+            capture_output=True,
+            text=True,
+            timeout=NODE_TIMEOUT,
+            shell=False,
+        )
+    except ValidatorRuntimeUnavailable as exc:
+        return {
+            "is_valid": False,
+            "errors": [str(exc)],
+            "warnings": [],
+            "runtime_error": True,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "is_valid": False,
+            "errors": ["JavaScript syntax check timed out"],
+            "warnings": [],
+            "runtime_error": True,
+        }
+    except Exception as exc:
+        return {
+            "is_valid": False,
+            "errors": [f"JavaScript syntax check failed: {exc}"],
+            "warnings": [],
+            "runtime_error": True,
+        }
+
+    if result.returncode == 0:
+        return None
+    detail = (result.stderr.strip() or result.stdout.strip() or "unknown syntax error")[:500]
+    return {
+        "is_valid": False,
+        "errors": [f"JavaScript syntax error: {detail}"],
+        "warnings": [],
+    }
+
 
 # Ruby AST analysis script using the standard-library Ripper parser.
 # Walks the Ripper sexp to verify that required structural elements exist
@@ -329,3 +389,279 @@ def validate_metasploit(
         warnings.append("Consider adding comments for maintainability")
 
     return {"is_valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+_ZAP_COMMON_METADATA_KEYS = (
+    "id",
+    "name",
+    "description",
+    "solution",
+    "references",
+    "risk",
+    "confidence",
+    "cweId",
+    "wascId",
+    "status",
+)
+_ZAP_ACTIVE_METADATA_KEYS = (*_ZAP_COMMON_METADATA_KEYS, "category")
+_ZAP_RISK_VALUES = {"info", "low", "medium", "high"}
+_ZAP_CONFIDENCE_VALUES = {
+    "false_positive",
+    "low",
+    "medium",
+    "high",
+    "user_confirmed",
+}
+_ZAP_ACTIVE_CATEGORY_VALUES = {
+    "info_gather",
+    "browser",
+    "server",
+    "misc",
+    "injection",
+}
+
+
+def _strip_javascript_literals(content: str) -> str:
+    """Replace JavaScript comments and string contents while preserving structure."""
+    output: list[str] = []
+    index = 0
+    state = "code"
+    quote = ""
+    while index < len(content):
+        current = content[index]
+        following = content[index + 1] if index + 1 < len(content) else ""
+
+        if state == "code":
+            if current == "/" and following == "/":
+                output.extend((" ", " "))
+                index += 2
+                state = "line_comment"
+                continue
+            if current == "/" and following == "*":
+                output.extend((" ", " "))
+                index += 2
+                state = "block_comment"
+                continue
+            if current in ("'", '"', "`"):
+                quote = current
+                output.append(" ")
+                index += 1
+                state = "string"
+                continue
+            output.append(current)
+            index += 1
+            continue
+
+        if state == "line_comment":
+            output.append("\n" if current == "\n" else " ")
+            index += 1
+            if current == "\n":
+                state = "code"
+            continue
+
+        if state == "block_comment":
+            if current == "*" and following == "/":
+                output.extend((" ", " "))
+                index += 2
+                state = "code"
+                continue
+            output.append("\n" if current == "\n" else " ")
+            index += 1
+            continue
+
+        if current == "\\":
+            output.append(" ")
+            if following:
+                output.append("\n" if following == "\n" else " ")
+                index += 2
+            else:
+                index += 1
+            continue
+        output.append("\n" if current == "\n" else " ")
+        index += 1
+        if current == quote:
+            state = "code"
+
+    return "".join(output)
+
+
+def _validate_zap_metadata(
+    content: str,
+    code: str,
+    errors: list[str],
+    *,
+    active: bool,
+) -> None:
+    if not re.search(r"\bfunction\s+getMetadata\s*\(\s*\)", code):
+        errors.append("Missing required function: 'getMetadata'")
+    if "ScanRuleMetadata.fromYaml" not in code:
+        errors.append("getMetadata must return ScanRuleMetadata.fromYaml(...)")
+
+    matches = re.finditer(
+        r"ScanRuleMetadata\.fromYaml\s*\(\s*`(?P<yaml>.*?)`\s*\)",
+        content,
+        re.DOTALL,
+    )
+    token = "ScanRuleMetadata.fromYaml"
+    match = next(
+        (
+            candidate
+            for candidate in matches
+            if code[candidate.start() : candidate.start() + len(token)] == token
+        ),
+        None,
+    )
+    if match is None:
+        errors.append("Missing ScanRuleMetadata YAML template literal")
+        return
+
+    try:
+        metadata = yaml.safe_load(match.group("yaml"))
+    except yaml.YAMLError as exc:
+        errors.append(f"Invalid ZAP metadata YAML: {exc}")
+        return
+    if not isinstance(metadata, dict):
+        errors.append("ZAP metadata YAML must define a mapping")
+        return
+
+    required_keys = _ZAP_ACTIVE_METADATA_KEYS if active else _ZAP_COMMON_METADATA_KEYS
+    for key in required_keys:
+        if key not in metadata:
+            errors.append(f"Missing required ZAP metadata key: '{key}'")
+
+    metadata_id = metadata.get("id")
+    if not isinstance(metadata_id, int) or isinstance(metadata_id, bool):
+        errors.append("ZAP metadata 'id' must be numeric")
+
+    risk = str(metadata.get("risk", "")).lower()
+    if risk not in _ZAP_RISK_VALUES:
+        errors.append("ZAP metadata 'risk' must be info, low, medium, or high")
+
+    confidence = str(metadata.get("confidence", "")).lower()
+    if confidence not in _ZAP_CONFIDENCE_VALUES:
+        errors.append("ZAP metadata 'confidence' has an unsupported value")
+
+    references = metadata.get("references")
+    if not isinstance(references, list) or not references:
+        errors.append("ZAP metadata 'references' must be a non-empty list")
+
+    for key in ("cweId", "wascId"):
+        value = metadata.get(key)
+        if not isinstance(value, int) or isinstance(value, bool):
+            errors.append(f"ZAP metadata '{key}' must be numeric")
+
+    if active:
+        category = str(metadata.get("category", "")).lower()
+        if category not in _ZAP_ACTIVE_CATEGORY_VALUES:
+            errors.append(
+                "ZAP active metadata 'category' must be info_gather, browser, "
+                "server, misc, or injection"
+            )
+
+def _missing_tokens(code: str, requirements: dict[str, str], errors: list[str]) -> None:
+    for token, message in requirements.items():
+        if token not in code:
+            errors.append(message)
+
+
+def validate_zap_active_scan(content: str) -> dict[str, Any]:
+    """Validate a JavaScript ZAP Active Rule detection artifact."""
+    if not content or not content.strip():
+        return {"is_valid": False, "errors": ["Empty ZAP active rule content"], "warnings": []}
+
+    syntax_failure = _javascript_syntax_failure(content)
+    if syntax_failure is not None:
+        return syntax_failure
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    code = _strip_javascript_literals(content)
+    _validate_zap_metadata(content, code, errors, active=True)
+
+    if not re.search(
+        r"\bfunction\s+scan\s*\(\s*as\s*,\s*msg\s*,\s*param\s*,\s*value\s*\)",
+        code,
+    ):
+        errors.append("Active rule must define function scan(as, msg, param, value)")
+
+    _missing_tokens(
+        code,
+        {
+            "cloneRequest": "Active rule must clone the request before mutation",
+            "as.setParam": "Active rule must inject its probe with as.setParam(...)",
+            "as.sendAndReceive": "Active rule must send its probe with as.sendAndReceive(...)",
+            "as.newAlert": "Active rule must create an alert with as.newAlert(...)",
+            ".setParam": "Active alert must identify the tested parameter",
+            ".setAttack": "Active alert must record the probe value",
+            ".setEvidence": "Active alert must record response evidence",
+            ".setMessage": "Active alert must attach the probe message",
+            ".raise": "Active rule must raise the constructed alert",
+        },
+        errors,
+    )
+    if "getResponseBody" not in code and "getResponseHeader" not in code:
+        errors.append("Active rule must inspect the probe response")
+    if not re.search(r"\bif\s*\(", code):
+        errors.append("Active rule must gate its alert on a detection condition")
+    if "as.isStop" not in code:
+        warnings.append("Check as.isStop() before sending active probes")
+
+    return {"is_valid": not errors, "errors": errors, "warnings": warnings}
+
+
+def validate_zap_passive_scan(content: str) -> dict[str, Any]:
+    """Validate a JavaScript ZAP Passive Rule and reject network side effects."""
+    if not content or not content.strip():
+        return {"is_valid": False, "errors": ["Empty ZAP passive rule content"], "warnings": []}
+
+    syntax_failure = _javascript_syntax_failure(content)
+    if syntax_failure is not None:
+        return syntax_failure
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    code = _strip_javascript_literals(content)
+    _validate_zap_metadata(content, code, errors, active=False)
+
+    if not re.search(
+        r"\bfunction\s+scan\s*\(\s*(?:ps|helper)\s*,\s*msg\s*,\s*src\s*\)",
+        code,
+    ):
+        errors.append("Passive rule must define function scan(ps, msg, src)")
+
+    _missing_tokens(
+        code,
+        {
+            ".newAlert": "Passive rule must create an alert",
+            ".setEvidence": "Passive alert must record precise evidence",
+            ".setMessage": "Passive alert must attach the inspected message",
+            ".raise": "Passive rule must raise the constructed alert",
+        },
+        errors,
+    )
+    if not any(
+        token in code
+        for token in (
+            "getRequestHeader",
+            "getRequestBody",
+            "getResponseHeader",
+            "getResponseBody",
+        )
+    ):
+        errors.append("Passive rule must inspect the supplied HTTP message")
+    if not re.search(r"\bif\s*\(", code):
+        errors.append("Passive rule must gate its alert on a detection condition")
+
+    forbidden_patterns = {
+        r"\bsendAndReceive\b": "Passive rules must not send requests",
+        r"\bfetch\s*\(": "Passive rules must not call fetch",
+        r"\bXMLHttpRequest\b": "Passive rules must not use XMLHttpRequest",
+        r"\bHttpSender\b": "Passive rules must not use HttpSender",
+        r"\bURLConnection\b|\bjava\.net\b": "Passive rules must not use network APIs",
+        r"\b(?:ps|helper)\s*\.\s*setParam\s*\(": "Passive rules must not mutate parameters",
+        r"\bmsg\s*\.\s*set(?:Request|Response)": "Passive rules must not mutate messages",
+    }
+    for pattern, message in forbidden_patterns.items():
+        if re.search(pattern, code):
+            errors.append(message)
+
+    return {"is_valid": not errors, "errors": errors, "warnings": warnings}

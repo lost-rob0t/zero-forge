@@ -29,6 +29,10 @@ class VulnerabilityInput(BaseModel):
         default="",
         description="CVE identifier, e.g. CVE-2021-44228. Optional for source-only analysis.",
     )
+    artifact_type: ArtifactType = Field(
+        default=ArtifactType.METASPLOIT,
+        description="Security artifact format to generate",
+    )
     poc_text: str = Field(default="", description="Public proof-of-concept text or code")
     writeup_text: str = Field(default="", description="Vulnerability write-up or analysis")
     source_path: str | None = Field(default=None, description="Path to vulnerable source code")

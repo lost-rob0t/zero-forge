@@ -45,7 +45,11 @@ def create_default_registry() -> ToolRegistry:
     """Create and populate a registry with the default built-in tools."""
     from .cve_lookup import cve_lookup
     from .source_inspect import git_diff_inspect, read_source_files, search_code
-    from .validator import validate_metasploit
+    from .validator import (
+        validate_metasploit,
+        validate_zap_active_scan,
+        validate_zap_passive_scan,
+    )
 
     reg = ToolRegistry()
     reg.register("cve_lookup", cve_lookup)
@@ -53,4 +57,6 @@ def create_default_registry() -> ToolRegistry:
     reg.register("search_code", search_code)
     reg.register("git_diff_inspect", git_diff_inspect)
     reg.register("validate_metasploit", validate_metasploit)
+    reg.register("validate_zap_active_scan", validate_zap_active_scan)
+    reg.register("validate_zap_passive_scan", validate_zap_passive_scan)
     return reg

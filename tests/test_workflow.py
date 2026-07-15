@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from zero_forge.agents.smart_agent import LLMConfigurationError, LLMProviderError
-from zero_forge.schemas import CollectedContext, VulnerabilityInput, WorkflowState
+from zero_forge.schemas import ArtifactType, CollectedContext, VulnerabilityInput, WorkflowState
 from zero_forge.tools.validator import ValidatorRuntimeUnavailable
 from zero_forge.workflow import (
     build_workflow,
@@ -93,6 +93,61 @@ def test_missing_ruby_fails_before_context_or_generation(monkeypatch):
     assert result.repair_attempts == 0
     assert result.context is None
     assert result.artifact is None
+
+
+def test_zap_generation_does_not_require_ruby(tmp_path, monkeypatch):
+    monkeypatch.setattr("zero_forge.workflow.require_node_runtime", lambda: "node")
+
+    def unavailable():
+        raise ValidatorRuntimeUnavailable("Ruby unavailable")
+
+    monkeypatch.setattr("zero_forge.workflow.require_ruby_runtime", unavailable)
+    _disable_provider_keys(monkeypatch)
+    monkeypatch.setenv("ZERO_FORGE_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "zero_forge.workflow.ToolAgent.collect_context",
+        lambda _self, vuln_input: CollectedContext(cve_id=vuln_input.cve_id),
+    )
+
+    result = run_workflow(
+        VulnerabilityInput(
+            cve_id="CVE-2021-44228",
+            artifact_type=ArtifactType.ZAP_ACTIVE,
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.failure is not None
+    assert result.failure.code == "llm_configuration_error"
+
+
+def test_missing_node_fails_before_zap_generation(monkeypatch):
+    message = "Node.js is required for ZAP JavaScript syntax validation"
+
+    def unavailable():
+        raise ValidatorRuntimeUnavailable(message)
+
+    monkeypatch.setattr("zero_forge.workflow.require_node_runtime", unavailable)
+    monkeypatch.setattr(
+        "zero_forge.workflow.ToolAgent.collect_context",
+        lambda *_args: pytest.fail("context collection must not run"),
+    )
+    monkeypatch.setattr(
+        "zero_forge.workflow.generate_artifact",
+        lambda *_args: pytest.fail("generation must not run"),
+    )
+
+    result = run_workflow(
+        VulnerabilityInput(
+            cve_id="CVE-2021-44228",
+            artifact_type=ArtifactType.ZAP_PASSIVE,
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.error == message
+    assert result.failure is not None
+    assert result.failure.code == "validator_runtime_unavailable"
 
 
 def test_provider_failure_becomes_structured_workflow_error(monkeypatch):
