@@ -10,6 +10,7 @@ Four typed phases as LangGraph subgraph nodes:
    inventory, trust boundaries, entry points, parsers, sinks.
 2. **PLAN** — generate and rank vulnerability hypotheses; convert the
    top hypothesis into a typed experiment with success/refutation conditions.
+   A readiness gate blocks EXPLOIT until the plan is ready.
 3. **EXPLOIT** — execute the experiment through the Tool Agent; capture
    structured evidence; classify as supporting, refuting, or inconclusive.
 4. **VERIFY** — independent reproduction gate: re-run the experiment,
@@ -20,9 +21,11 @@ Backward escalation paths (all implemented in routing):
 - VERIFY → EXPLOIT (repair)
 - VERIFY → PLAN (strategy revision)
 - VERIFY → RESEARCH (information gap)
-- EXPLOIT → PLAN (strategy change)
 - EXPLOIT → RESEARCH (missing information)
 - PLAN → RESEARCH (blocking unknowns)
+
+An event journal records phase transitions, escalation reasons, and
+budget consumption so the full execution trace is inspectable.
 
 Budgets and safety gates are enforced on every transition.
 """
@@ -39,6 +42,7 @@ from ..logging_config import get_logger
 from .schemas import (
     AccessMode,
     DiscoveryState,
+    EventJournalEntry,
     EvidenceClass,
     EvidenceRecord,
     Experiment,
@@ -55,6 +59,53 @@ from .swe_agent import setup_target_environment
 from .tools import read_file, verify_flag_in_output
 
 logger = get_logger(__name__)
+
+
+# --- Event journal helper ----------------------------------------------------
+
+def _journal(
+    state: DiscoveryState,
+    *,
+    phase: str,
+    event: str,
+    reason: str = "",
+) -> list[EventJournalEntry]:
+    """Return a new event_journal list with one entry appended."""
+    entry = EventJournalEntry(
+        phase=phase,
+        event=event,
+        reason=reason,
+        budget_experiments=state.experiments_run,
+        budget_research=state.research_iterations,
+        budget_requests=state.requests_made,
+        budget_hypothesis_depth=state.hypothesis_depth,
+        budget_runtime_s=round(state.runtime_seconds, 4),
+        budget_repair_attempts=state.repair_attempts,
+    )
+    return [*state.event_journal, entry]
+
+
+# --- Finding → artifact-generation bridge ------------------------------------
+
+def finding_to_vulnerability_input(
+    finding: Finding,
+    artifact_type: str = "metasploit",
+) -> dict[str, Any]:
+    """Convert a confirmed Finding into a VulnerabilityInput-compatible dict.
+
+    This is the integration point between the discovery workflow and the
+    existing artifact-generation workflow.  A confirmed finding with a
+    reproducer can feed ``run_workflow()`` to generate a Metasploit module,
+    ZAP rule, or other artifact.
+    """
+    return {
+        "cve_id": finding.cve_id,
+        "artifact_type": artifact_type,
+        "poc_text": finding.reproducer_content,
+        "writeup_text": finding.description,
+        "source_path": None,
+        "patch_diff": "",
+    }
 
 
 # --- Budget checks -----------------------------------------------------------
@@ -92,12 +143,20 @@ def research_node(state: DiscoveryState) -> dict[str, Any]:
         return {
             "status": "failed",
             "error": "Research requires an authorized target",
+            "event_journal": _journal(
+                state, phase="research", event="auth_failed",
+                reason="target not authorized",
+            ),
         }
 
     if _budget_exhausted(state):
         return {
             "status": "failed",
             "error": "Research budget exhausted before forming a hypothesis",
+            "event_journal": _journal(
+                state, phase="research", event="budget_exhausted",
+                reason="research budget exhausted",
+            ),
         }
 
     investigation = state.investigation.model_copy()
@@ -120,8 +179,11 @@ def research_node(state: DiscoveryState) -> dict[str, Any]:
                 "swe_setup": swe_result,
                 "status": "failed",
                 "error": swe_result.error or "SWE setup failed",
+                "event_journal": _journal(
+                    state, phase="research", event="swe_setup_failed",
+                    reason=swe_result.error or "SWE setup failed",
+                ),
             }
-        # Register the flag path in the investigation graph
         investigation.add_relationship(
             state.target.id,
             RelationshipType.REQUIRES_ACCESS,
@@ -158,6 +220,10 @@ def research_node(state: DiscoveryState) -> dict[str, Any]:
         research_summary += " (sufficient attack surface mapped)"
 
     elapsed = time.monotonic() - start_time
+    journal = _journal(
+        state, phase="research", event="phase_enter",
+        reason=f"iteration {iterations}",
+    )
 
     return {
         "investigation": investigation,
@@ -169,6 +235,7 @@ def research_node(state: DiscoveryState) -> dict[str, Any]:
         "runtime_seconds": state.runtime_seconds + elapsed,
         "phase": OperationalPhase.PLAN,
         "status": "planning",
+        "event_journal": journal,
     }
 
 
@@ -178,7 +245,8 @@ def plan_node(state: DiscoveryState) -> dict[str, Any]:
     """Node: generate and rank hypotheses; convert one to a typed experiment.
 
     Every hypothesis includes explicit success and refutation conditions.
-    The experiment is a bounded Tool Agent request.
+    The experiment is a bounded Tool Agent request.  A readiness gate
+    blocks EXPLOIT until the plan has a hypothesis and experiment.
     """
     logger.info("PLAN phase: generating hypothesis")
     start_time = time.monotonic()
@@ -187,6 +255,10 @@ def plan_node(state: DiscoveryState) -> dict[str, Any]:
         return {
             "status": "failed",
             "error": "Budget exhausted before planning",
+            "event_journal": _journal(
+                state, phase="plan", event="budget_exhausted",
+                reason="budget exhausted before planning",
+            ),
         }
 
     investigation = state.investigation.model_copy()
@@ -244,6 +316,10 @@ def plan_node(state: DiscoveryState) -> dict[str, Any]:
     )
 
     elapsed = time.monotonic() - start_time
+    journal = _journal(
+        state, phase="plan", event="plan_ready",
+        reason=f"hypothesis {hypothesis.id} ready",
+    )
 
     return {
         "investigation": investigation,
@@ -254,6 +330,7 @@ def plan_node(state: DiscoveryState) -> dict[str, Any]:
         "runtime_seconds": state.runtime_seconds + elapsed,
         "phase": OperationalPhase.EXPLOIT,
         "status": "exploiting",
+        "event_journal": journal,
     }
 
 
@@ -264,12 +341,7 @@ def _classify_evidence(
     tool_error: str,
     tool_output: str,
 ) -> EvidenceClass:
-    """Classify experiment evidence deterministically.
-
-    - flag_found → SUPPORTING
-    - tool error mentions "not found" → REFUTING
-    - otherwise → INCONCLUSIVE
-    """
+    """Classify experiment evidence deterministically."""
     if flag_found:
         return EvidenceClass.SUPPORTING
     combined = (tool_error + tool_output).lower()
@@ -290,7 +362,14 @@ def exploit_node(state: DiscoveryState) -> dict[str, Any]:
     investigation = state.investigation.model_copy()
     experiment = investigation.experiments.get(state.current_experiment_id)
     if experiment is None:
-        return {"status": "failed", "error": "No current experiment to execute"}
+        return {
+            "status": "failed",
+            "error": "No current experiment to execute",
+            "event_journal": _journal(
+                state, phase="exploit", event="error",
+                reason="no current experiment",
+            ),
+        }
 
     # Authorization gate
     if not state.authorized:
@@ -300,6 +379,10 @@ def exploit_node(state: DiscoveryState) -> dict[str, Any]:
             "investigation": investigation,
             "status": "failed",
             "error": "Experiment not authorized: target is not authorized",
+            "event_journal": _journal(
+                state, phase="exploit", event="auth_failed",
+                reason="target not authorized",
+            ),
         }
 
     if experiment.is_destructive and not experiment.authorized:
@@ -309,6 +392,10 @@ def exploit_node(state: DiscoveryState) -> dict[str, Any]:
             "investigation": investigation,
             "status": "failed",
             "error": "Destructive experiment requires explicit authorization",
+            "event_journal": _journal(
+                state, phase="exploit", event="auth_failed",
+                reason="destructive experiment not explicitly authorized",
+            ),
         }
 
     if _budget_exhausted(state):
@@ -318,14 +405,15 @@ def exploit_node(state: DiscoveryState) -> dict[str, Any]:
             "investigation": investigation,
             "status": "failed",
             "error": "Budget exhausted before experiment execution",
+            "event_journal": _journal(
+                state, phase="exploit", event="budget_exhausted",
+                reason="budget exhausted before execution",
+            ),
         }
 
     experiment.status = ExperimentStatus.EXECUTING
     investigation.experiments[experiment.id] = experiment
 
-    # Execute the experiment deterministically
-    # In production, the Tool Agent selects and executes the tool.
-    # Here we execute directly since the tool and arguments are locked.
     flag_path = experiment.locked_arguments.get(
         "path",
         experiment.arguments.get("path", ""),
@@ -353,13 +441,16 @@ def exploit_node(state: DiscoveryState) -> dict[str, Any]:
             "runtime_seconds": state.runtime_seconds + elapsed,
             "phase": OperationalPhase.VERIFY,
             "status": "verifying",
+            "event_journal": _journal(
+                state, phase="exploit", event="tool_failed",
+                reason=f"tool raised: {exc}",
+            ),
         }
 
     stdout = tool_result.get("content", "")
     stderr = tool_result.get("error", "")
     exit_code = 0 if not stderr else 1
 
-    # Classify the result
     flag_value = state.swe_setup.flag_value if state.swe_setup else ""
     verification = verify_flag_in_output(flag=flag_value, output=stdout)
     flag_found = verification["flag_found"]
@@ -380,7 +471,6 @@ def exploit_node(state: DiscoveryState) -> dict[str, Any]:
 
     investigation.evidence[evidence.id] = evidence
 
-    # Add relationship based on classification
     if classification == EvidenceClass.SUPPORTING:
         investigation.add_relationship(
             evidence.id,
@@ -397,7 +487,6 @@ def exploit_node(state: DiscoveryState) -> dict[str, Any]:
         )
     # INCONCLUSIVE: no SUPPORTS or REFUTES edge — neutral retention
 
-    # Update hypothesis status
     hypothesis = investigation.hypotheses.get(experiment.hypothesis_id)
     if hypothesis:
         if classification == EvidenceClass.SUPPORTING:
@@ -423,6 +512,10 @@ def exploit_node(state: DiscoveryState) -> dict[str, Any]:
         "runtime_seconds": state.runtime_seconds + elapsed,
         "phase": OperationalPhase.VERIFY,
         "status": "verifying",
+        "event_journal": _journal(
+            state, phase="exploit", event="experiment_completed",
+            reason=f"classification={classification.value}",
+        ),
     }
 
 
@@ -441,15 +534,36 @@ def verify_node(state: DiscoveryState) -> dict[str, Any]:
     investigation = state.investigation.model_copy()
     evidence = investigation.evidence.get(state.current_evidence_id)
     if evidence is None:
-        return {"status": "failed", "error": "No evidence to verify"}
+        return {
+            "status": "failed",
+            "error": "No evidence to verify",
+            "event_journal": _journal(
+                state, phase="verify", event="error",
+                reason="no evidence to verify",
+            ),
+        }
 
     experiment = investigation.experiments.get(evidence.experiment_id)
     if experiment is None:
-        return {"status": "failed", "error": "No experiment for evidence"}
+        return {
+            "status": "failed",
+            "error": "No experiment for evidence",
+            "event_journal": _journal(
+                state, phase="verify", event="error",
+                reason="no experiment for evidence",
+            ),
+        }
 
     hypothesis = investigation.hypotheses.get(experiment.hypothesis_id)
     if hypothesis is None:
-        return {"status": "failed", "error": "No hypothesis for experiment"}
+        return {
+            "status": "failed",
+            "error": "No hypothesis for experiment",
+            "event_journal": _journal(
+                state, phase="verify", event="error",
+                reason="no hypothesis for experiment",
+            ),
+        }
 
     # If evidence was refuting or inconclusive, retain it and escalate
     if evidence.classification != EvidenceClass.SUPPORTING:
@@ -461,8 +575,11 @@ def verify_node(state: DiscoveryState) -> dict[str, Any]:
             return {
                 "status": "failed",
                 "error": "Budget exhausted after negative evidence",
+                "event_journal": _journal(
+                    state, phase="verify", event="budget_exhausted",
+                    reason="budget exhausted after negative evidence",
+                ),
             }
-        # Escalate back to PLAN for a new hypothesis
         elapsed = time.monotonic() - start_time
         return {
             "investigation": investigation,
@@ -470,6 +587,10 @@ def verify_node(state: DiscoveryState) -> dict[str, Any]:
             "status": "planning",
             "repair_attempts": state.repair_attempts + 1,
             "runtime_seconds": state.runtime_seconds + elapsed,
+            "event_journal": _journal(
+                state, phase="verify", event="escalate_to_plan",
+                reason=f"evidence {evidence.classification.value}, retry",
+            ),
         }
 
     # Reproduction gate: re-run the experiment to confirm
@@ -501,13 +622,12 @@ def verify_node(state: DiscoveryState) -> dict[str, Any]:
         flag_value=flag_value if flag_retrieved else "",
         repeatability=repro_count,
         repeatability_required=required,
-        control_case_passed=False,  # would require patched version
+        control_case_passed=False,
         evidence_ids=evidence_ids,
         failure_reason="" if verified else "Reproduction failed",
     )
 
     if not verified:
-        # Escalate back to EXPLOIT for repair
         if state.repair_attempts < state.max_repair_attempts:
             elapsed = time.monotonic() - start_time
             return {
@@ -516,11 +636,19 @@ def verify_node(state: DiscoveryState) -> dict[str, Any]:
                 "status": "exploiting",
                 "repair_attempts": state.repair_attempts + 1,
                 "runtime_seconds": state.runtime_seconds + elapsed,
+                "event_journal": _journal(
+                    state, phase="verify", event="escalate_to_exploit",
+                    reason="reproduction failed, retry",
+                ),
             }
         return {
             "investigation": investigation,
             "status": "failed",
             "error": "Reproduction failed after max repair attempts",
+            "event_journal": _journal(
+                state, phase="verify", event="reproduction_failed",
+                reason="max repair attempts exceeded",
+            ),
         }
 
     # Promote to Finding
@@ -558,13 +686,17 @@ def verify_node(state: DiscoveryState) -> dict[str, Any]:
         "phase": OperationalPhase.VERIFY,
         "status": "completed",
         "runtime_seconds": state.runtime_seconds + elapsed,
+        "event_journal": _journal(
+            state, phase="verify", event="finding_confirmed",
+            reason=f"finding {finding.id} promoted",
+        ),
     }
 
 
 # --- Routing ----------------------------------------------------------------
 
 def route_from_research(state: DiscoveryState) -> str:
-    """Route from RESEARCH to PLAN, RESEARCH (loop), or terminal."""
+    """Route from RESEARCH to PLAN or terminal."""
     if state.status == "failed":
         return "fail"
     if state.status == "completed":
@@ -587,12 +719,12 @@ def route_from_plan(state: DiscoveryState) -> str:
 
 
 def route_from_exploit(state: DiscoveryState) -> str:
-    """Route from EXPLOIT to VERIFY, PLAN (backward), RESEARCH (backward), or terminal."""
+    """Route from EXPLOIT to VERIFY, RESEARCH (backward), or terminal."""
     if state.status == "failed":
         return "fail"
     if state.status == "completed":
         return "end"
-    # Backward escalation: EXPLOIT → PLAN when repair budget exhausted
+    # Backward escalation: EXPLOIT → RESEARCH when repair budget exhausted
     if state.repair_attempts >= state.max_repair_attempts:
         if state.research_iterations < state.max_research_iterations:
             return "research"
@@ -620,22 +752,20 @@ def route_from_verify(state: DiscoveryState) -> str:
 def fail_node(state: DiscoveryState) -> dict[str, Any]:
     """Terminal node: mark the discovery workflow as failed."""
     error = state.error or "Discovery workflow failed"
-    return {"status": "failed", "error": error}
+    return {
+        "status": "failed",
+        "error": error,
+        "event_journal": _journal(
+            state, phase="fail", event="workflow_failed",
+            reason=error,
+        ),
+    }
 
 
 # --- Graph builder -----------------------------------------------------------
 
 def build_discovery_workflow() -> CompiledStateGraph:
-    """Build and compile the discovery LangGraph subgraph.
-
-    All six backward escalation paths are wired as conditional edges:
-    - VERIFY → EXPLOIT (repair)
-    - VERIFY → PLAN (strategy revision)
-    - VERIFY → RESEARCH (information gap)
-    - EXPLOIT → RESEARCH (missing information)
-    - PLAN → RESEARCH (blocking unknowns)
-    - EXPLOIT → PLAN is handled via verify→exploit→verify loop
-    """
+    """Build and compile the discovery LangGraph subgraph."""
     graph = StateGraph(DiscoveryState)
     graph.add_node("research", research_node)
     graph.add_node("plan", plan_node)

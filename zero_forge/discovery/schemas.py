@@ -353,6 +353,47 @@ class SWESetupResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class EventJournalEntry(BaseModel):
+    """A single event in the discovery workflow execution journal.
+
+    Records phase transitions, escalation reasons, and budget consumption
+    so the full execution trace is inspectable by humans and CI.
+    """
+
+    timestamp: str = Field(default_factory=_utc_now)
+    phase: str = ""  # research, plan, exploit, verify
+    event: str = ""  # phase_enter, phase_exit, escalate, budget_exhausted, etc.
+    reason: str = ""
+    budget_experiments: int = 0
+    budget_research: int = 0
+    budget_requests: int = 0
+    budget_hypothesis_depth: int = 0
+    budget_runtime_s: float = 0.0
+    budget_repair_attempts: int = 0
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class MetasploitRCConfig(BaseModel):
+    """Configuration for generating a Metasploit resource (.rc) file.
+
+    Per the maintainer's direction: generate a .rc file and execute it
+    using the -r flag with msfconsole.
+    """
+
+    module_name: str = ""  # e.g. exploit/multi/handler
+    options: dict[str, str] = Field(default_factory=dict)
+    payload: str = ""
+    lhost: str = ""
+    lport: str = ""
+    rhost: str = ""
+    rport: str = ""
+    additional_commands: list[str] = Field(default_factory=list)
+    auto_run: bool = True  # append 'exploit -j' at the end
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class DiscoveryState(BaseModel):
     """State flowing through the discovery LangGraph subgraph.
 
@@ -396,6 +437,9 @@ class DiscoveryState(BaseModel):
 
     # Findings
     findings: list[Finding] = Field(default_factory=list)
+
+    # Event journal: records phase transitions, escalation reasons, budget consumption
+    event_journal: list[EventJournalEntry] = Field(default_factory=list)
 
     # Terminal state
     # pending, researching, planning, exploiting, verifying, completed, failed

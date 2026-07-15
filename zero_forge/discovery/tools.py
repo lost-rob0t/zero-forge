@@ -206,6 +206,70 @@ def verify_flag_in_output(flag: str, output: str) -> dict[str, Any]:
     }
 
 
+def generate_metasploit_rc(
+    module_name: str,
+    *,
+    options: dict[str, str] | None = None,
+    payload: str = "",
+    lhost: str = "",
+    lport: str = "",
+    rhost: str = "",
+    rport: str = "",
+    additional_commands: list[str] | None = None,
+    auto_run: bool = True,
+) -> str:
+    """Generate a Metasploit resource (.rc) file content.
+
+    Per the maintainer's direction: generate a .rc file and execute it
+    using ``msfconsole -q -r <file>``.
+
+    Returns the .rc file content as a string.
+    """
+    lines: list[str] = []
+    opts = options or {}
+
+    # Merge structured fields into options dict
+    if payload:
+        opts["PAYLOAD"] = payload
+    if lhost:
+        opts["LHOST"] = lhost
+    if lport:
+        opts["LPORT"] = lport
+    if rhost:
+        opts["RHOST"] = rhost
+    if rport:
+        opts["RPORT"] = rport
+
+    if module_name:
+        lines.append(f"use {module_name}")
+
+    for key, value in opts.items():
+        lines.append(f"set {key} {value}")
+
+    if additional_commands:
+        lines.extend(additional_commands)
+
+    if auto_run:
+        lines.append("exploit -j")
+
+    return "\n".join(lines) + "\n"
+
+
+def write_metasploit_rc(
+    content: str,
+    output_path: str,
+) -> str:
+    """Write a Metasploit .rc file to disk.
+
+    Returns the absolute path to the written file.
+    """
+    p = Path(output_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding="utf-8")
+    logger.info("Metasploit .rc file written to %s", p.resolve())
+    return str(p.resolve())
+
+
 def read_file(path: str, max_bytes: int = MAX_FILE_READ_BYTES) -> dict[str, Any]:
     """Read a file's contents within bounded limits.
 

@@ -40,14 +40,17 @@ from zero_forge.discovery.tools import (
     ToolPathError,
     execute_metasploit_rc,
     generate_flag,
+    generate_metasploit_rc,
     read_file,
     verify_flag_in_output,
     write_flag_to_path,
+    write_metasploit_rc,
 )
 from zero_forge.discovery.workflow import (
     _classify_evidence,
     build_discovery_workflow,
     exploit_node,
+    finding_to_vulnerability_input,
     plan_node,
     research_node,
     run_discovery,
@@ -649,3 +652,167 @@ class TestClassifyEvidence:
     def test_empty_output_is_inconclusive(self):
         result = _classify_evidence(False, "", "")
         assert result == EvidenceClass.INCONCLUSIVE
+
+
+# --- Metasploit .rc generation tests ----------------------------------------
+
+class TestMetasploitRCGeneration:
+    def test_generate_basic_rc(self):
+        rc = generate_metasploit_rc(
+            "exploit/multi/handler",
+            payload="cmd/unix/reverse_bash",
+            lhost="10.0.0.1",
+            lport="4444",
+        )
+        assert "use exploit/multi/handler" in rc
+        assert "set PAYLOAD cmd/unix/reverse_bash" in rc
+        assert "set LHOST 10.0.0.1" in rc
+        assert "set LPORT 4444" in rc
+        assert "exploit -j" in rc
+
+    def test_generate_rc_no_auto_run(self):
+        rc = generate_metasploit_rc(
+            "exploit/multi/handler",
+            auto_run=False,
+        )
+        assert "exploit -j" not in rc
+
+    def test_generate_rc_with_additional_commands(self):
+        rc = generate_metasploit_rc(
+            "auxiliary/scanner/http/enum",
+            additional_commands=["set THREADS 10", "set RHOSTS 10.0.0.0/24"],
+        )
+        assert "set THREADS 10" in rc
+        assert "set RHOSTS 10.0.0.0/24" in rc
+
+    def test_generate_rc_with_options(self):
+        rc = generate_metasploit_rc(
+            "exploit/windows/smb/ms17_010_eternalblue",
+            options={"RHOSTS": "192.168.1.10", "PAYLOAD": "windows/x64/meterpreter/reverse_tcp"},
+        )
+        assert "set RHOSTS 192.168.1.10" in rc
+        assert "set PAYLOAD windows/x64/meterpreter/reverse_tcp" in rc
+
+    def test_write_rc_to_disk(self, tmp_path):
+        rc_content = generate_metasploit_rc(
+            "exploit/multi/handler",
+            payload="cmd/unix/reverse_bash",
+        )
+        rc_path = write_metasploit_rc(rc_content, str(tmp_path / "exploit.rc"))
+        from pathlib import Path
+        assert Path(rc_path).is_file()
+        written = Path(rc_path).read_text()
+        assert "use exploit/multi/handler" in written
+
+
+# --- Event journal tests -----------------------------------------------------
+
+class TestEventJournal:
+    def test_research_records_journal_entry(self, tmp_path):
+        target = _make_target()
+        state = DiscoveryState(target=target, authorized=True)
+        patch_result = research_node(state)
+        assert "event_journal" in patch_result
+        journal = patch_result["event_journal"]
+        assert len(journal) >= 1
+        entry = journal[-1]
+        assert entry.phase == "research"
+        assert entry.event == "phase_enter"
+
+    def test_unauthorized_records_journal(self):
+        target = _make_target(authorized=False)
+        state = DiscoveryState(target=target, authorized=False)
+        patch_result = research_node(state)
+        journal = patch_result["event_journal"]
+        assert len(journal) >= 1
+        entry = journal[-1]
+        assert entry.event == "auth_failed"
+
+    def test_plan_records_journal(self, tmp_path):
+        target = _make_target()
+        swe = _make_swe_setup(tmp_path)
+        state = DiscoveryState(target=target, authorized=True, swe_setup=swe)
+        state = state.model_copy(update=research_node(state))
+        patch_result = plan_node(state)
+        journal = patch_result["event_journal"]
+        assert len(journal) >= 1
+        entry = journal[-1]
+        assert entry.event == "plan_ready"
+
+    def test_exploit_records_journal(self, tmp_path):
+        target = _make_target()
+        swe = _make_swe_setup(tmp_path)
+        state = DiscoveryState(target=target, authorized=True, swe_setup=swe)
+        state = state.model_copy(update=research_node(state))
+        state = state.model_copy(update=plan_node(state))
+        patch_result = exploit_node(state)
+        journal = patch_result["event_journal"]
+        assert len(journal) >= 1
+        entry = journal[-1]
+        assert entry.event == "experiment_completed"
+
+    def test_verify_finding_records_journal(self, tmp_path):
+        target = _make_target()
+        swe = _make_swe_setup(tmp_path)
+        state = DiscoveryState(target=target, authorized=True, swe_setup=swe)
+        state = state.model_copy(update=research_node(state))
+        state = state.model_copy(update=plan_node(state))
+        state = state.model_copy(update=exploit_node(state))
+        patch_result = verify_node(state)
+        journal = patch_result["event_journal"]
+        entry = journal[-1]
+        assert entry.event == "finding_confirmed"
+
+    def test_journal_records_budget(self, tmp_path):
+        target = _make_target()
+        state = DiscoveryState(
+            target=target, authorized=True,
+            experiments_run=3,
+            requests_made=15,
+        )
+        patch_result = research_node(state)
+        journal = patch_result["event_journal"]
+        entry = journal[-1]
+        assert entry.budget_experiments == 3
+        assert entry.budget_requests == 15
+
+    def test_full_workflow_has_journal(self):
+        target = Target(name="test-target", authorized=True)
+        result = run_discovery(target, authorized=True)
+        assert len(result.event_journal) > 0
+        events = [e.event for e in result.event_journal]
+        assert "finding_confirmed" in events
+
+
+class TestFindingToArtifactBridge:
+    def test_finding_converts_to_vulnerability_input(self):
+        finding = Finding(
+            target_id="t1",
+            hypothesis_id="h1",
+            cve_id="CVE-2024-12345",
+            weakness="rce",
+            description="Remote code execution via flag retrieval",
+            reproducer_content="read_file(path='/tmp/flag.txt')",
+            reproducer_type="read_file",
+        )
+        result = finding_to_vulnerability_input(finding)
+        assert result["cve_id"] == "CVE-2024-12345"
+        assert result["artifact_type"] == "metasploit"
+        assert result["poc_text"] == "read_file(path='/tmp/flag.txt')"
+        assert result["writeup_text"] == "Remote code execution via flag retrieval"
+
+    def test_finding_bridge_defaults_to_metasploit(self):
+        finding = Finding(
+            target_id="t1",
+            hypothesis_id="h1",
+        )
+        result = finding_to_vulnerability_input(finding)
+        assert result["artifact_type"] == "metasploit"
+
+    def test_finding_bridge_accepts_zap_type(self):
+        finding = Finding(
+            target_id="t1",
+            hypothesis_id="h1",
+        )
+        result = finding_to_vulnerability_input(finding, artifact_type="zap_active_scan")
+        assert result["artifact_type"] == "zap_active_scan"

@@ -73,3 +73,58 @@ VulnerabilityInput
 The public Python/Context API, typed planning, additional artifact types, discovery
 workflows, and deterministic exploit verification remain roadmap work tracked in GitHub
 issues. They are not implied capabilities of the current release.
+
+## Discovery workflow
+
+The discovery subpackage (`zero_forge/discovery/`) implements a separate LangGraph
+subgraph for vulnerability discovery.  It is distinct from the artifact-generation
+workflow and does not share state with it.
+
+### Execution graph vs investigation graph
+
+ZeroForge maintains two separate graph structures during discovery:
+
+| Graph | Type | Purpose |
+| --- | --- | --- |
+| Execution graph | LangGraph `StateGraph` | Owns phase ordering, routing, budgets, retries, authorization gates, and terminal states.  Nodes are functions that return state patches. |
+| Investigation graph | `InvestigationGraph` (Pydantic) | Persistent, typed storage of investigation entities (Target, Component, Observation, Hypothesis, Experiment, Evidence, Finding) and their relationships.  Negative and inconclusive results are retained so the system does not repeat disproven theories. |
+
+The execution graph drives the workflow; the investigation graph stores the evidence.
+An event journal records phase transitions, escalation reasons, and budget
+consumption so the full execution trace is inspectable.
+
+### Four-phase operational mode
+
+```text
+RESEARCH (iterative deep research loop)
+    → attack surface, trust boundaries, entry points, sinks
+PLAN (strategy design, readiness gate)
+    → hypothesis with success/refutation conditions, typed experiment
+EXPLOIT (construction + execution)
+    → tool execution, evidence capture, classification
+VERIFY (independent reproduction gate)
+    → flag retrieval check, repeatability, Finding promotion
+```
+
+Backward escalation paths: VERIFY→EXPLOIT (repair), VERIFY→PLAN (strategy revision),
+VERIFY→RESEARCH (information gap), EXPLOIT→RESEARCH, PLAN→RESEARCH.
+
+### Flag-based verification
+
+Per the maintainer's simplified direction: the SWE agent places a randomized flag
+(via `flag_gen.sh` reading `/dev/urandom`) at a known path.  The exploit phase
+reads the flag path.  Verification is a deterministic substring match — no LLM
+judgment and no Prolog.  A Finding cannot be created without successful reproduction.
+
+### Finding → artifact-generation bridge
+
+Confirmed findings can feed the existing artifact-generation workflow via
+`finding_to_vulnerability_input()`, which converts a `Finding` into a
+`VulnerabilityInput`-compatible dict.
+
+### Budgets and safety gates
+
+The discovery subgraph enforces configurable maximums for experiments, research
+iterations, requests, hypothesis depth, repair attempts, and runtime.  Authorization
+is checked before any filesystem or Docker operations.  Intrusive or destructive
+experiments require explicit approval.
