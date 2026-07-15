@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from ..config import ModelConfig, Settings, get_settings
 from ..schemas import WorkflowError
@@ -120,7 +121,16 @@ def _is_retryable_provider_error(exc: Exception) -> bool:
     )
 
 
-def call_model(role: str, config: ModelConfig, system_prompt: str, user_prompt: str) -> str:
+def call_model(
+    role: str,
+    config: ModelConfig,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    additional_messages: list[dict[str, str]] | None = None,
+    attempt: int = 1,
+    max_attempts: int = 1,
+) -> str:
     """Call exactly the configured role model and return non-empty text."""
     resolved = resolve_model(role, config)
     if not resolved.api_key:
@@ -130,7 +140,16 @@ def call_model(role: str, config: ModelConfig, system_prompt: str, user_prompt: 
             provider=resolved.provider,
             model=resolved.model,
             retryable=False,
+            attempt=attempt,
+            max_attempts=max_attempts,
         )
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    if additional_messages:
+        messages.extend(additional_messages)
 
     try:
         import litellm
@@ -138,10 +157,7 @@ def call_model(role: str, config: ModelConfig, system_prompt: str, user_prompt: 
         response = litellm.completion(
             model=resolved.model,
             api_key=resolved.api_key,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=messages,
             temperature=config.temperature,
             max_tokens=config.max_tokens,
             **resolved.extra_kwargs,
@@ -153,6 +169,8 @@ def call_model(role: str, config: ModelConfig, system_prompt: str, user_prompt: 
             provider=resolved.provider,
             model=resolved.model,
             retryable=_is_retryable_provider_error(exc),
+            attempt=attempt,
+            max_attempts=max_attempts,
         ) from exc
 
     try:
@@ -164,6 +182,8 @@ def call_model(role: str, config: ModelConfig, system_prompt: str, user_prompt: 
             provider=resolved.provider,
             model=resolved.model,
             retryable=False,
+            attempt=attempt,
+            max_attempts=max_attempts,
         ) from exc
 
     if not isinstance(content, str) or not content.strip():
@@ -173,5 +193,7 @@ def call_model(role: str, config: ModelConfig, system_prompt: str, user_prompt: 
             provider=resolved.provider,
             model=resolved.model,
             retryable=False,
+            attempt=attempt,
+            max_attempts=max_attempts,
         )
     return content
