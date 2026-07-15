@@ -25,6 +25,21 @@ def test_tool_agent_lists_tools():
     tools = ToolAgent().list_available_tools()
     assert "cve_lookup" in tools
     assert "validate_metasploit" in tools
+    assert "validate_zap_active_scan" in tools
+    assert "validate_zap_passive_scan" in tools
+
+
+def test_tool_agent_dispatches_zap_validator(monkeypatch):
+    _stub_selection(monkeypatch)
+    registry = ToolRegistry()
+    registry.register(
+        "validate_zap_passive_scan",
+        lambda content: {"is_valid": content == "passive"},
+    )
+
+    result = ToolAgent(registry).validate_artifact("passive", "zap_passive_scan")
+
+    assert result.is_valid is True
 
 
 def test_tool_agent_validate_valid(monkeypatch):

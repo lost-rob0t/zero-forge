@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -14,6 +15,8 @@ from zero_forge.tools.validator import (
     ValidatorRuntimeUnavailable,
     require_ruby_runtime,
     validate_metasploit,
+    validate_zap_active_scan,
+    validate_zap_passive_scan,
 )
 
 # --------------------------------------------------------------------------- #
@@ -297,9 +300,84 @@ def test_empty_content():
     assert "Empty module content" in result["errors"]
 
 
-# --------------------------------------------------------------------------- #
-# 11. Ruby executable unavailable fails closed
-# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "path",
+    sorted(Path("llm_examples/zap/active").glob("*.js")),
+)
+def test_zap_active_examples_validate(path):
+    result = validate_zap_active_scan(path.read_text(encoding="utf-8"))
+
+    assert result["is_valid"] is True
+    assert result["errors"] == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(Path("llm_examples/zap/passive").glob("*.js")),
+)
+def test_zap_passive_examples_validate(path):
+    result = validate_zap_passive_scan(path.read_text(encoding="utf-8"))
+
+    assert result["is_valid"] is True
+    assert result["errors"] == []
+
+
+def test_zap_active_requires_detection_flow():
+    content = Path("llm_examples/zap/active/reflected_input.js").read_text(
+        encoding="utf-8"
+    )
+    content = content.replace("as.sendAndReceive(probe, false, false);", "")
+
+    result = validate_zap_active_scan(content)
+
+    assert result["is_valid"] is False
+    assert any("send its probe" in error for error in result["errors"])
+
+
+def test_zap_passive_rejects_network_side_effects():
+    content = Path("llm_examples/zap/passive/missing_csp.js").read_text(
+        encoding="utf-8"
+    )
+    content = content.replace(
+        "const responseHeader = msg.getResponseHeader();",
+        "as.sendAndReceive(msg, false, false);\n"
+        "  const responseHeader = msg.getResponseHeader();",
+    )
+
+    result = validate_zap_passive_scan(content)
+
+    assert result["is_valid"] is False
+    assert "Passive rules must not send requests" in result["errors"]
+
+
+def test_zap_passive_ignores_forbidden_words_in_comments_and_strings():
+    content = Path("llm_examples/zap/passive/missing_csp.js").read_text(
+        encoding="utf-8"
+    )
+    content += '\n// sendAndReceive fetch XMLHttpRequest\nconst note = "HttpSender";\n'
+
+    result = validate_zap_passive_scan(content)
+
+    assert result["is_valid"] is True
+
+
+def test_zap_metadata_inside_comment_does_not_satisfy_contract():
+    content = Path("llm_examples/zap/passive/missing_csp.js").read_text(
+        encoding="utf-8"
+    )
+    content = content.replace(
+        "return ScanRuleMetadata.fromYaml(`",
+        "return null;\n  /* ScanRuleMetadata.fromYaml(`",
+    ).replace(
+        "`);\n}",
+        "`); */\n}",
+        1,
+    )
+
+    result = validate_zap_passive_scan(content)
+
+    assert result["is_valid"] is False
+    assert "Missing ScanRuleMetadata YAML template literal" in result["errors"]
 
 
 def test_ruby_preflight_returns_resolved_executable():
@@ -313,6 +391,11 @@ def test_ruby_preflight_missing_is_actionable():
         pytest.raises(ValidatorRuntimeUnavailable, match="install Ruby 3.3.8"),
     ):
         require_ruby_runtime()
+
+
+# --------------------------------------------------------------------------- #
+# 11. Ruby executable unavailable fails closed
+# --------------------------------------------------------------------------- #
 
 
 def test_ruby_unavailable_fails_closed():

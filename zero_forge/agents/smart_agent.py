@@ -1,8 +1,11 @@
-"""Smart Agent: analyzes vulnerability and writes security artifacts using LLM."""
+"""Smart Agent: analyzes vulnerabilities and writes security artifacts using an LLM."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from ..config import get_settings
+from ..examples import ArtifactExample, load_artifact_examples
 from ..schemas import (
     Artifact,
     ArtifactType,
@@ -26,43 +29,135 @@ __all__ = [
     "LLMResponseError",
 ]
 
-SYSTEM_PROMPT = """\
-You are a security research expert specializing in exploit development.
-You analyze vulnerabilities and generate security artifacts for authorized testing.
-You write clean, functional Metasploit exploit modules following Metasploit Framework conventions.
 
-CRITICAL: You MUST identify the specific target software, vendor,
-and vulnerability type from the provided context.
-- Name the actual software (e.g., "Adobe ColdFusion", "Apache Log4j", "WordPress Plugin X")
-- Reference the actual CVE ID provided in the context
-- Describe the actual vulnerability type (e.g., path traversal, RCE, SQL injection, SSRF)
-- Target the actual endpoints, parameters, and file paths mentioned in the PoC or write-up
-- Never generate a generic module — always be specific to the target software
+@dataclass(frozen=True, slots=True)
+class ArtifactProfile:
+    """Prompt and output contract for one artifact type."""
 
-When writing a Metasploit module:
-- Use the class-based module format (class MetasploitModule < Msf::Exploit)
-- Include all required metadata: Name, Description, Author, References, License
-- Define initialize() and exploit() methods
-- Include register_options() for configurable parameters
-- Use Rex::Text and Metasploit::Payload patterns
-- Add comments explaining the vulnerability and exploitation strategy
-- Write Ruby code compatible with Metasploit Framework
+    label: str
+    language: str
+    fence_aliases: tuple[str, ...]
+    filename_suffix: str
+    system_instructions: str
+    contract: str
 
-Always output the complete module code in a single code block.
+
+_BASE_SYSTEM_PROMPT = """\
+You are a security research expert producing security artifacts for authorized testing.
+Use only the supplied vulnerability evidence. Identify the actual software, vendor, CVE,
+vulnerability type, endpoints, parameters, and affected versions. Never substitute a
+generic target. Emit one complete artifact and no prose outside its code fence.
 """
+
+_PROFILES = {
+    ArtifactType.METASPLOIT: ArtifactProfile(
+        label="Metasploit exploit module",
+        language="ruby",
+        fence_aliases=("ruby", "rb"),
+        filename_suffix="_exploit.rb",
+        system_instructions="""\
+Write Ruby compatible with current Metasploit Framework conventions. The module must
+be a class named MetasploitModule under Msf::Exploit::Remote, include real initialize
+and exploit methods, register required options, validate responses, and include
+vulnerability-specific metadata and references.
+""",
+        contract="""\
+- Define class MetasploitModule < Msf::Exploit::Remote.
+- Include Name, Description, Author, References, License, Targets, and DefaultTarget.
+- Define initialize(info = {}), register target-specific options, and define exploit.
+- Use the correct remote mixins, payload pattern, endpoint, parameters, and protocol.
+- Check every network response and fail with an appropriate Failure reason.
+- Add a non-destructive check method when the evidence supports one.
+- Output one complete Ruby module in a ruby code fence.
+""",
+    ),
+    ArtifactType.ZAP_ACTIVE: ArtifactProfile(
+        label="ZAP active scan detection rule",
+        language="javascript",
+        fence_aliases=("javascript", "js"),
+        filename_suffix="_zap_active.js",
+        system_instructions="""\
+Write a GraalVM JavaScript Active Rule for the ZAP Script Console. Use non-destructive
+detection probes. The script must mutate only a cloned request, send the probe through
+the active helper, compare response evidence, and raise a fully populated alert.
+""",
+        contract="""\
+- Import ScanRuleMetadata and return ScanRuleMetadata.fromYaml(...) from getMetadata().
+- Metadata must include numeric id, name, description, solution, references, category,
+  risk, confidence, cweId, wascId, and status.
+- Define function scan(as, msg, param, value).
+- Clone msg before mutation, call as.setParam(), then as.sendAndReceive().
+- Inspect the probe response for vulnerability-specific evidence.
+- Raise with as.newAlert().setParam().setAttack().setEvidence().setMessage().raise().
+- Use a harmless, deterministic probe and stop promptly when as.isStop() is true.
+- Output one complete JavaScript rule in a javascript code fence.
+""",
+    ),
+    ArtifactType.ZAP_PASSIVE: ArtifactProfile(
+        label="ZAP passive scan detection rule",
+        language="javascript",
+        fence_aliases=("javascript", "js"),
+        filename_suffix="_zap_passive.js",
+        system_instructions="""\
+Write a GraalVM JavaScript Passive Rule for the ZAP Script Console. Passive rules
+inspect an existing HTTP message only. They must never send a request, alter a request,
+or perform any other network operation.
+""",
+        contract="""\
+- Import ScanRuleMetadata and return ScanRuleMetadata.fromYaml(...) from getMetadata().
+- Metadata must include numeric id, name, description, solution, references, risk,
+  confidence, cweId, wascId, and status.
+- Define function scan(ps, msg, src).
+- Inspect only msg request/response headers or bodies already supplied by ZAP.
+- Exclude irrelevant content types where appropriate and capture precise evidence.
+- Raise with ps.newAlert().setEvidence().setMessage(msg).raise().
+- Never call sendAndReceive, setParam, fetch, HttpSender, or any network API.
+- Output one complete JavaScript rule in a javascript code fence.
+""",
+    ),
+}
+
+SYSTEM_PROMPT = _BASE_SYSTEM_PROMPT + _PROFILES[ArtifactType.METASPLOIT].system_instructions
+
+
+def _profile(artifact_type: ArtifactType) -> ArtifactProfile:
+    return _PROFILES[artifact_type]
+
+
+def _system_prompt(artifact_type: ArtifactType) -> str:
+    return _BASE_SYSTEM_PROMPT + _profile(artifact_type).system_instructions
+
+
+def _format_examples(artifact_type: ArtifactType) -> str:
+    examples = load_artifact_examples(artifact_type)
+    if not examples:
+        return "No local reference examples are available; follow the contract exactly."
+
+    profile = _profile(artifact_type)
+    parts = [
+        "Use these as structural references only. Adapt every target-specific detail "
+        "to the supplied vulnerability context."
+    ]
+    for example in examples:
+        parts.append(f"### {example.name}")
+        parts.append(f"```{profile.language}\n{example.content}\n```")
+    return "\n\n".join(parts)
 
 
 def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> str:
-    parts: list[str] = []
-    parts.append(f"## CVE: {ctx.cve_id}")
+    profile = _profile(vuln.artifact_type)
+    parts: list[str] = [
+        f"## Requested Artifact\n{profile.label} ({vuln.artifact_type.value})",
+        f"## Artifact Contract\n{profile.contract.strip()}",
+        f"## CVE: {ctx.cve_id}",
+    ]
     if ctx.cve_description:
         parts.append(f"### Description\n{ctx.cve_description}")
     if ctx.affected_versions:
         parts.append(f"### Affected Versions\n{ctx.affected_versions}")
     if ctx.references:
         parts.append("### References")
-        for ref in ctx.references[:10]:
-            parts.append(f"- {ref}")
+        parts.extend(f"- {ref}" for ref in ctx.references[:10])
     if ctx.poc_text:
         parts.append(f"### Proof of Concept\n```\n{ctx.poc_text[:4000]}\n```")
     if ctx.writeup_text:
@@ -71,50 +166,63 @@ def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> st
         parts.append(f"### Patch / Diff\n```diff\n{ctx.patch_diff[:4000]}\n```")
     if ctx.source_files:
         parts.append("### Relevant Files from Source")
-        for sf in ctx.source_files[:8]:
-            budget = 6000 if sf.category == "documentation" else 4000
-            label = sf.category.upper() if sf.category != "code" else "CODE"
-            parts.append(f"**[{label}] File: {sf.filename}** (language: {sf.language})")
-            parts.append(f"```\n{sf.content[:budget]}\n```")
+        for source_file in ctx.source_files[:8]:
+            budget = 6000 if source_file.category == "documentation" else 4000
+            label = source_file.category.upper() if source_file.category != "code" else "CODE"
+            parts.append(
+                f"**[{label}] File: {source_file.filename}** "
+                f"(language: {source_file.language})"
+            )
+            parts.append(f"```\n{source_file.content[:budget]}\n```")
     if ctx.extra_notes:
         parts.append(f"### Notes\n{ctx.extra_notes}")
-    parts.append("""
-## Task
-Based on the vulnerability context above, write a complete Metasploit exploit module.
-Follow Metasploit Framework conventions strictly.
-Output only the Ruby module code in a single ```ruby code block.
-""")
+    parts.extend(
+        [
+            f"## Reference {profile.label} Examples\n{_format_examples(vuln.artifact_type)}",
+            (
+                f"## Task\nWrite one complete, target-specific {profile.label}. "
+                f"Follow the artifact contract exactly. Output only a single "
+                f"```{profile.language} code block."
+            ),
+        ]
+    )
     return "\n\n".join(parts)
 
 
 def _build_repair_prompt(artifact: Artifact, validation: ValidationResult) -> str:
-    parts: list[str] = []
-    parts.append("## Validation Errors")
-    for err in validation.errors:
-        parts.append(f"- {err}")
+    profile = _profile(artifact.artifact_type)
+    parts = [
+        f"## Artifact Contract\n{profile.contract.strip()}",
+        "## Validation Errors",
+        *(f"- {error}" for error in validation.errors),
+    ]
     if validation.warnings:
-        parts.append("\n## Warnings")
-        for warn in validation.warnings:
-            parts.append(f"- {warn}")
-    parts.append("\n## Current Module")
-    parts.append(f"```ruby\n{artifact.content}\n```")
-    parts.append("""
-## Task
-Fix all validation errors in the Metasploit module above.
-Output the complete corrected module in a single ```ruby code block.
-""")
+        parts.extend(["## Warnings", *(f"- {warning}" for warning in validation.warnings)])
+    parts.extend(
+        [
+            f"## Reference {profile.label} Examples\n{_format_examples(artifact.artifact_type)}",
+            f"## Current Artifact\n```{profile.language}\n{artifact.content}\n```",
+            (
+                f"## Task\nFix every validation error without changing the artifact type. "
+                f"Return the complete corrected artifact in one "
+                f"```{profile.language} code block."
+            ),
+        ]
+    )
     return "\n\n".join(parts)
 
 
-def _extract_code_block(text: str) -> str:
-    for fence in ("```ruby", "```rb", "```"):
-        if fence in text:
-            start = text.index(fence) + len(fence)
-            remaining = text[start:]
-            if "```" in remaining:
-                end = remaining.index("```")
-                return remaining[:end].strip()
-            return remaining.strip()
+def _extract_code_block(text: str, artifact_type: ArtifactType = ArtifactType.METASPLOIT) -> str:
+    profile = _profile(artifact_type)
+    fences = [f"```{alias}" for alias in profile.fence_aliases]
+    fences.append("```")
+    for fence in fences:
+        if fence not in text:
+            continue
+        remaining = text[text.index(fence) + len(fence) :]
+        if "```" in remaining:
+            return remaining[: remaining.index("```")].strip()
+        return remaining.strip()
     return text.strip()
 
 
@@ -129,79 +237,72 @@ def _provider_name() -> str:
     return resolve_model("smart", cfg.models.smart).provider
 
 
-def _call_llm(system_prompt: str, user_prompt: str) -> str:
+def _call_llm(
+    system_prompt: str,
+    user_prompt: str,
+    artifact_type: ArtifactType = ArtifactType.METASPLOIT,
+) -> str:
     cfg = get_settings()
     if cfg.llm.stub_mode:
-        return _stub_metasploit_module()
+        return _stub_artifact(artifact_type)
     return call_model("smart", cfg.models.smart, system_prompt, user_prompt)
 
 
-def _stub_metasploit_module() -> str:
-    return """```ruby
-#
-# Metasploit module generated by ZeroForge (stub mode)
-#
-
-class MetasploitModule < Msf::Exploit::Remote
-  Rank = ExcellentRanking
-
+def _stub_artifact(artifact_type: ArtifactType) -> str:
+    profile = _profile(artifact_type)
+    examples: list[ArtifactExample] = load_artifact_examples(artifact_type, max_examples=1)
+    if examples:
+        return f"```{profile.language}\n{examples[0].content}\n```"
+    if artifact_type == ArtifactType.METASPLOIT:
+        content = """class MetasploitModule < Msf::Exploit::Remote
   def initialize(info = {})
     super(update_info(info,
-      'Name' => 'ZeroForge Generated Exploit',
-      'Description' => %q{
-        This module was generated by ZeroForge for authorized security testing.
-        Replace this description with vulnerability-specific details.
-      },
+      'Name' => 'ZeroForge Stub',
+      'Description' => 'Explicit placeholder mode',
       'Author' => ['ZeroForge'],
-      'References' => [
-        ['CVE', ''],
-      ],
-      'License' => MSF_LICENSE,
-      'Platform' => ['unix', 'linux'],
-      'Arch' => [ARCH_X86, ARCH_X64],
-      'Targets' => [
-        ['Automatic', {}]
-      ],
-      'DefaultTarget' => 0,
-      'DefaultOptions' => {
-        'RPORT' => 8080
-      }
+      'References' => [],
+      'License' => MSF_LICENSE
     ))
-
-    register_options([
-      Opt::RPORT(8080),
-      OptString.new('TARGETURI', [true, 'Base path', '/'])
-    ])
   end
 
   def exploit
-    # TODO: implement exploitation logic
-    connect
-    sock.puts("exploit payload\n")
-    disconnect
+    fail_with(Failure::BadConfig, 'Stub mode cannot exploit a target')
   end
+end"""
+    else:
+        helper = "as" if artifact_type == ArtifactType.ZAP_ACTIVE else "ps"
+        signature = (
+            "as, msg, param, value"
+            if artifact_type == ArtifactType.ZAP_ACTIVE
+            else "ps, msg, src"
+        )
+        content = (
+            "function getMetadata() { return null; }\n"
+            f"function scan({signature}) {{ {helper}.newAlert; }}"
+        )
+    return f"```{profile.language}\n{content}\n```"
 
-  def check
-    # TODO: implement check logic
-    CheckCode::Detected
-  end
-end
-```"""
+
+def _artifact_filename(cve_id: str, artifact_type: ArtifactType) -> str:
+    stem = cve_id.lower().replace("-", "_")
+    return f"{stem}{_profile(artifact_type).filename_suffix}"
 
 
 def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext) -> Artifact:
+    artifact_type = vuln_input.artifact_type
     prompt = _build_context_prompt(vuln_input, context)
-    raw = _call_llm(SYSTEM_PROMPT, prompt)
-    code = _extract_code_block(raw)
+    raw = _call_llm(_system_prompt(artifact_type), prompt, artifact_type)
+    code = _extract_code_block(raw, artifact_type)
     cfg = get_settings()
     return Artifact(
-        artifact_type=ArtifactType.METASPLOIT,
+        artifact_type=artifact_type,
         content=code,
-        filename=f"{context.cve_id.lower().replace('-', '_')}_exploit.rb",
+        filename=_artifact_filename(context.cve_id, artifact_type),
         metadata={
             "model": cfg.models.smart.model,
             "model_role": "smart",
             "cve_id": context.cve_id,
+            "artifact_type": artifact_type.value,
             "stub": cfg.llm.stub_mode,
         },
     )
@@ -211,8 +312,8 @@ def repair_artifact(
     artifact: Artifact, validation: ValidationResult, context: CollectedContext
 ) -> Artifact:
     prompt = _build_repair_prompt(artifact, validation)
-    raw = _call_llm(SYSTEM_PROMPT, prompt)
-    code = _extract_code_block(raw)
+    raw = _call_llm(_system_prompt(artifact.artifact_type), prompt, artifact.artifact_type)
+    code = _extract_code_block(raw, artifact.artifact_type)
     if not code.strip():
         return artifact
     return Artifact(

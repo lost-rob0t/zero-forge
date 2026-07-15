@@ -329,3 +329,242 @@ def validate_metasploit(
         warnings.append("Consider adding comments for maintainability")
 
     return {"is_valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+
+_ZAP_METADATA_KEYS = (
+    "id",
+    "name",
+    "description",
+    "solution",
+    "references",
+    "risk",
+    "confidence",
+    "cweId",
+    "wascId",
+    "status",
+)
+
+
+def _strip_javascript_literals(content: str) -> str:
+    """Replace JavaScript comments and string contents while preserving structure."""
+    output: list[str] = []
+    index = 0
+    state = "code"
+    quote = ""
+    while index < len(content):
+        current = content[index]
+        following = content[index + 1] if index + 1 < len(content) else ""
+
+        if state == "code":
+            if current == "/" and following == "/":
+                output.extend((" ", " "))
+                index += 2
+                state = "line_comment"
+                continue
+            if current == "/" and following == "*":
+                output.extend((" ", " "))
+                index += 2
+                state = "block_comment"
+                continue
+            if current in ("'", '"', "`"):
+                quote = current
+                output.append(" ")
+                index += 1
+                state = "string"
+                continue
+            output.append(current)
+            index += 1
+            continue
+
+        if state == "line_comment":
+            output.append("\n" if current == "\n" else " ")
+            index += 1
+            if current == "\n":
+                state = "code"
+            continue
+
+        if state == "block_comment":
+            if current == "*" and following == "/":
+                output.extend((" ", " "))
+                index += 2
+                state = "code"
+                continue
+            output.append("\n" if current == "\n" else " ")
+            index += 1
+            continue
+
+        if current == "\\":
+            output.append(" ")
+            if following:
+                output.append("\n" if following == "\n" else " ")
+                index += 2
+            else:
+                index += 1
+            continue
+        output.append("\n" if current == "\n" else " ")
+        index += 1
+        if current == quote:
+            state = "code"
+
+    return "".join(output)
+
+
+def _validate_balanced_javascript(code: str, errors: list[str]) -> None:
+    code = re.sub(r"/(?:\\.|[^/\\\n])+/[a-z]*", " ", code)
+    for opening, closing in (("(", ")"), ("{", "}"), ("[", "]")):
+        depth = 0
+        for character in code:
+            if character == opening:
+                depth += 1
+            elif character == closing:
+                depth -= 1
+                if depth < 0:
+                    errors.append(f"Unbalanced JavaScript delimiter: unexpected '{closing}'")
+                    break
+        if depth > 0:
+            errors.append(f"Unbalanced JavaScript delimiter: missing '{closing}'")
+
+
+def _validate_zap_metadata(content: str, code: str, errors: list[str]) -> None:
+    if not re.search(r"\bfunction\s+getMetadata\s*\(\s*\)", code):
+        errors.append("Missing required function: 'getMetadata'")
+    if "ScanRuleMetadata.fromYaml" not in code:
+        errors.append("getMetadata must return ScanRuleMetadata.fromYaml(...)")
+
+    matches = re.finditer(
+        r"ScanRuleMetadata\.fromYaml\s*\(\s*`(?P<yaml>.*?)`\s*\)",
+        content,
+        re.DOTALL,
+    )
+    token = "ScanRuleMetadata.fromYaml"
+    match = next(
+        (
+            candidate
+            for candidate in matches
+            if code[candidate.start() : candidate.start() + len(token)] == token
+        ),
+        None,
+    )
+    if match is None:
+        errors.append("Missing ScanRuleMetadata YAML template literal")
+        return
+
+    metadata = match.group("yaml")
+    for key in _ZAP_METADATA_KEYS:
+        if not re.search(rf"(?m)^\s*{re.escape(key)}\s*:", metadata):
+            errors.append(f"Missing required ZAP metadata key: '{key}'")
+    if not re.search(r"(?m)^\s*id\s*:\s*\d+\s*$", metadata):
+        errors.append("ZAP metadata 'id' must be numeric")
+    if not re.search(
+        r"(?mi)^\s*risk\s*:\s*(info|low|medium|high)\s*(?:#.*)?$", metadata
+    ):
+        errors.append("ZAP metadata 'risk' must be info, low, medium, or high")
+    if not re.search(
+        r"(?mi)^\s*confidence\s*:\s*"
+        r"(false_positive|low|medium|high|user_confirmed)\s*(?:#.*)?$",
+        metadata,
+    ):
+        errors.append("ZAP metadata 'confidence' has an unsupported value")
+
+
+def _missing_tokens(code: str, requirements: dict[str, str], errors: list[str]) -> None:
+    for token, message in requirements.items():
+        if token not in code:
+            errors.append(message)
+
+
+def validate_zap_active_scan(content: str) -> dict[str, Any]:
+    """Validate a JavaScript ZAP Active Rule detection artifact."""
+    if not content or not content.strip():
+        return {"is_valid": False, "errors": ["Empty ZAP active rule content"], "warnings": []}
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    code = _strip_javascript_literals(content)
+    _validate_balanced_javascript(code, errors)
+    _validate_zap_metadata(content, code, errors)
+
+    if not re.search(
+        r"\bfunction\s+scan\s*\(\s*as\s*,\s*msg\s*,\s*param\s*,\s*value\s*\)",
+        code,
+    ):
+        errors.append("Active rule must define function scan(as, msg, param, value)")
+
+    _missing_tokens(
+        code,
+        {
+            "cloneRequest": "Active rule must clone the request before mutation",
+            "as.setParam": "Active rule must inject its probe with as.setParam(...)",
+            "as.sendAndReceive": "Active rule must send its probe with as.sendAndReceive(...)",
+            "as.newAlert": "Active rule must create an alert with as.newAlert(...)",
+            ".setParam": "Active alert must identify the tested parameter",
+            ".setAttack": "Active alert must record the probe value",
+            ".setEvidence": "Active alert must record response evidence",
+            ".setMessage": "Active alert must attach the probe message",
+            ".raise": "Active rule must raise the constructed alert",
+        },
+        errors,
+    )
+    if "getResponseBody" not in code and "getResponseHeader" not in code:
+        errors.append("Active rule must inspect the probe response")
+    if not re.search(r"\bif\s*\(", code):
+        errors.append("Active rule must gate its alert on a detection condition")
+    if "as.isStop" not in code:
+        warnings.append("Check as.isStop() before sending active probes")
+
+    return {"is_valid": not errors, "errors": errors, "warnings": warnings}
+
+
+def validate_zap_passive_scan(content: str) -> dict[str, Any]:
+    """Validate a JavaScript ZAP Passive Rule and reject network side effects."""
+    if not content or not content.strip():
+        return {"is_valid": False, "errors": ["Empty ZAP passive rule content"], "warnings": []}
+
+    errors: list[str] = []
+    warnings: list[str] = []
+    code = _strip_javascript_literals(content)
+    _validate_balanced_javascript(code, errors)
+    _validate_zap_metadata(content, code, errors)
+
+    if not re.search(
+        r"\bfunction\s+scan\s*\(\s*(?:ps|helper)\s*,\s*msg\s*,\s*src\s*\)",
+        code,
+    ):
+        errors.append("Passive rule must define function scan(ps, msg, src)")
+
+    _missing_tokens(
+        code,
+        {
+            ".newAlert": "Passive rule must create an alert",
+            ".setEvidence": "Passive alert must record precise evidence",
+            ".setMessage": "Passive alert must attach the inspected message",
+            ".raise": "Passive rule must raise the constructed alert",
+        },
+        errors,
+    )
+    if not any(
+        token in code
+        for token in (
+            "getRequestHeader",
+            "getRequestBody",
+            "getResponseHeader",
+            "getResponseBody",
+        )
+    ):
+        errors.append("Passive rule must inspect the supplied HTTP message")
+    if not re.search(r"\bif\s*\(", code):
+        errors.append("Passive rule must gate its alert on a detection condition")
+
+    forbidden_patterns = {
+        r"\bsendAndReceive\b": "Passive rules must not send requests",
+        r"\bfetch\s*\(": "Passive rules must not call fetch",
+        r"\bXMLHttpRequest\b": "Passive rules must not use XMLHttpRequest",
+        r"\bHttpSender\b": "Passive rules must not use HttpSender",
+        r"\bURLConnection\b|\bjava\.net\b": "Passive rules must not use network APIs",
+        r"\b(?:ps|helper)\s*\.\s*setParam\s*\(": "Passive rules must not mutate parameters",
+        r"\bmsg\s*\.\s*set(?:Request|Response)": "Passive rules must not mutate messages",
+    }
+    for pattern, message in forbidden_patterns.items():
+        if re.search(pattern, code):
+            errors.append(message)
+
+    return {"is_valid": not errors, "errors": errors, "warnings": warnings}

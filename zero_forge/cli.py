@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from .config import get_settings
-from .schemas import VulnerabilityInput
+from .schemas import ArtifactType, VulnerabilityInput
 from .workflow import run_workflow
 
 app = typer.Typer(
@@ -19,10 +20,22 @@ app = typer.Typer(
 )
 console = Console()
 
+_ARTIFACT_TYPE_OPTION = cast(
+    ArtifactType,
+    typer.Option(
+        ArtifactType.METASPLOIT,
+        "--type",
+        "-t",
+        help="Artifact type to generate",
+        case_sensitive=False,
+    ),
+)
+
 
 @app.command()
 def generate(
     cve_id: str = typer.Option(..., "--cve", "-c", help="CVE identifier (e.g. CVE-2021-44228)"),
+    artifact_type: ArtifactType = _ARTIFACT_TYPE_OPTION,
     poc_file: str = typer.Option("", "--poc", "-p", help="Path to proof-of-concept file"),
     writeup_file: str = typer.Option("", "--writeup", "-w", help="Path to vulnerability write-up"),
     source_path: str = typer.Option("", "--source", "-s", help="Path to vulnerable source code"),
@@ -55,6 +68,7 @@ def generate(
 
     vuln_input = VulnerabilityInput(
         cve_id=cve_id,
+        artifact_type=artifact_type,
         poc_text=poc_text,
         writeup_text=writeup_text,
         source_path=source_path or None,
@@ -80,6 +94,7 @@ def generate(
     table.add_column("Value")
     table.add_row("Status", result.status)
     table.add_row("CVE", vuln_input.cve_id)
+    table.add_row("Artifact Type", vuln_input.artifact_type.value)
     if result.output_path:
         table.add_row("Output", result.output_path)
     if result.validation:
