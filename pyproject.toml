@@ -26,6 +26,16 @@ dev = [
 [project.scripts]
 zero-forge = "zero_forge.cli:app"
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["zero_forge*"]
+exclude = [
+    "tests*",
+    "wiki*",
+    "research*",
+    "dev_scripts*",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
