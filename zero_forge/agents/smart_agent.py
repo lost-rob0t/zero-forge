@@ -209,15 +209,23 @@ def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> st
                 f"3. Outline the artifact structure (metadata, options, demonstration method).\n"
                 f"4. Implement the complete {profile.label}.\n"
                 f"5. Add non-destructive verification where the evidence supports it.\n\n"
-                f"Follow the artifact contract exactly. Output only a single "
-                f"```{profile.language} code block."
+                f"Follow the artifact contract exactly. Output ONLY a single "
+                f"```{profile.language} code block containing complete, self-contained "
+                f"{profile.label} code. Do not include any explanatory text, prose, "
+                f"comments about what changed, or text outside the code block."
             ),
         ]
     )
     return "\n\n".join(parts)
 
 
-def _build_repair_prompt(artifact: Artifact, validation: ValidationResult) -> str:
+def _build_repair_prompt(
+    artifact: Artifact,
+    validation: ValidationResult,
+    *,
+    attempt: int = 0,
+    max_attempts: int = 0,
+) -> str:
     profile = _profile(artifact.artifact_type)
     parts = [
         f"## Artifact Contract\n{profile.contract.strip()}",
@@ -233,14 +241,39 @@ def _build_repair_prompt(artifact: Artifact, validation: ValidationResult) -> st
                 f"## Current Remediation Validation Module\n"
                 f"```{profile.language}\n{artifact.content}\n```"
             ),
-            (
-                f"## Task\nAddress all validation issues in the "
-                f"remediation validation module above. "
-                f"Return the complete corrected artifact in one "
-                f"```{profile.language} code block."
-            ),
         ]
     )
+    # Format reminder: prevent the model from mixing prose into code blocks (issue #72).
+    parts.append(
+        f"## Output Format\n"
+        f"Output ONLY {profile.language} code inside a single "
+        f"```{profile.language} code block. Do not include any explanatory "
+        f"text, comments about what changed, or prose outside the code block. "
+        f"The code block must contain a complete, self-contained "
+        f"{profile.label}."
+    )
+    # Attempt tracking and recurring-error guidance (issue #72).
+    task_parts = [
+        f"## Task\nAddress all validation issues in the "
+        f"remediation validation module above. "
+        f"Return the complete corrected artifact in one "
+        f"```{profile.language} code block."
+    ]
+    if attempt and max_attempts:
+        task_parts.append(
+            f"This is repair attempt {attempt} of {max_attempts}. "
+            f"{max_attempts - attempt + 1} attempt(s) remain after this one."
+        )
+        if attempt >= 2:
+            task_parts.append(
+                f"Previous repair attempts did not resolve the same errors. "
+                f"Take a different approach: carefully re-read the artifact "
+                f"contract and reference examples, ensure you are not "
+                f"including any non-{profile.language} text inside the code "
+                f"block, and verify every required method and metadata field "
+                f"is present."
+            )
+    parts.append(" ".join(task_parts))
     return "\n\n".join(parts)
 
 
@@ -394,13 +427,22 @@ def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext)
 
 
 def repair_artifact(
-    artifact: Artifact, validation: ValidationResult, context: CollectedContext
+    artifact: Artifact,
+    validation: ValidationResult,
+    context: CollectedContext,
+    *,
+    attempt: int = 0,
+    max_attempts: int = 0,
 ) -> Artifact:
     logger.info(
-        "Repairing artifact (%d validation errors)",
+        "Repairing artifact (%d validation errors, attempt %d/%d)",
         len(validation.errors),
+        attempt,
+        max_attempts,
     )
-    prompt = _build_repair_prompt(artifact, validation)
+    prompt = _build_repair_prompt(
+        artifact, validation, attempt=attempt, max_attempts=max_attempts
+    )
     raw = _call_llm(_system_prompt(artifact.artifact_type), prompt, artifact.artifact_type)
     code = _extract_code_block(raw, artifact.artifact_type)
     if _is_refusal(code):

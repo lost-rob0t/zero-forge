@@ -152,6 +152,17 @@ def test_build_context_prompt_has_multi_step_chain():
     assert "defensive proof-of-concept" in prompt.lower()
 
 
+def test_build_context_prompt_includes_only_code_reminder():
+    """Generation prompt must remind the model to output ONLY code, no prose (issue #72)."""
+    from zero_forge.agents.smart_agent import _build_context_prompt
+
+    ctx = CollectedContext(cve_id="CVE-2021-44228", cve_description="Log4Shell")
+    prompt = _build_context_prompt(VulnerabilityInput(cve_id="CVE-2021-44228"), ctx)
+    assert "ONLY a single" in prompt
+    assert "explanatory text" in prompt.lower()
+    assert "text outside the code block" in prompt.lower()
+
+
 def test_build_repair_prompt_uses_reframed_language():
     """Repair prompt must use reframed terminology, not bare 'fix the exploit' (issue #74)."""
     from zero_forge.agents.smart_agent import _build_repair_prompt
@@ -169,6 +180,71 @@ def test_build_repair_prompt_uses_reframed_language():
     assert "remediation validation module" in prompt.lower()
     assert "validation issues" in prompt.lower()
     assert "fix the exploit" not in prompt.lower()
+
+
+def test_build_repair_prompt_includes_format_reminder():
+    """Repair prompt must include a format-only-code reminder (issue #72)."""
+    from zero_forge.agents.smart_agent import _build_repair_prompt
+
+    artifact = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend",
+        filename="test.rb",
+    )
+    validation = ValidationResult(is_valid=False, errors=["syntax error"])
+    prompt = _build_repair_prompt(artifact, validation)
+    assert "## Output Format" in prompt
+    assert "only" in prompt.lower()
+    assert "explanatory text" in prompt.lower()
+
+
+def test_build_repair_prompt_includes_attempt_tracking():
+    """Repair prompt must include attempt number and remaining count (issue #72)."""
+    from zero_forge.agents.smart_agent import _build_repair_prompt
+
+    artifact = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend",
+        filename="test.rb",
+    )
+    validation = ValidationResult(is_valid=False, errors=["syntax error"])
+    prompt = _build_repair_prompt(
+        artifact, validation, attempt=1, max_attempts=3
+    )
+    assert "repair attempt 1 of 3" in prompt.lower()
+    assert "3 attempt(s) remain" in prompt.lower()
+
+
+def test_build_repair_prompt_includes_recurring_error_guidance():
+    """On attempt 2+, repair prompt must include recurring-error strategy guidance (issue #72)."""
+    from zero_forge.agents.smart_agent import _build_repair_prompt
+
+    artifact = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend",
+        filename="test.rb",
+    )
+    validation = ValidationResult(is_valid=False, errors=["syntax error"])
+    prompt = _build_repair_prompt(
+        artifact, validation, attempt=2, max_attempts=3
+    )
+    assert "different approach" in prompt.lower()
+    assert "non-ruby text" in prompt.lower()
+
+
+def test_build_repair_prompt_omits_attempt_info_when_default():
+    """Repair prompt should not include attempt tracking when defaults are used (backward compat)."""
+    from zero_forge.agents.smart_agent import _build_repair_prompt
+
+    artifact = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend",
+        filename="test.rb",
+    )
+    validation = ValidationResult(is_valid=False, errors=["syntax error"])
+    prompt = _build_repair_prompt(artifact, validation)
+    assert "repair attempt" not in prompt.lower()
+    assert "different approach" not in prompt.lower()
 
 
 def test_generate_artifact_logs_refusal_on_empty_code(monkeypatch, capsys):
