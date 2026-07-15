@@ -12,6 +12,7 @@ All tools are plain functions registered through the existing ToolRegistry.
 
 from __future__ import annotations
 
+import os
 import secrets
 import shutil
 import subprocess
@@ -29,12 +30,13 @@ FLAG_LENGTH = 32
 MSFCONSOLE_TIMEOUT = 120.0
 MAX_FILE_READ_BYTES = 50_000
 
-# Allowed flag output directories (prevents writing to arbitrary paths)
-_ALLOWED_FLAG_DIRS = frozenset({
-    "/tmp/zeroforge-target",
-    "/tmp/zeroforge",
-    "/tmp/pytest-of-root",  # pytest tmp_path base
-})
+# Allowed flag output roots (prevents writing to arbitrary paths).
+# Any path under these roots is acceptable; configurable via
+# ZERO_FORGE_FLAG_DIRS env var (colon-separated).
+_DEFAULT_FLAG_DIRS = "/tmp/zeroforge-target:/tmp/zeroforge:/tmp/pytest-of-"
+_ALLOWED_FLAG_DIRS = frozenset(
+    os.environ.get("ZERO_FORGE_FLAG_DIRS", _DEFAULT_FLAG_DIRS).split(":")
+)
 
 
 class ToolPathError(Exception):
