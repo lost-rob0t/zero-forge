@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 import zero_forge
 
 from zero_forge.examples import default_examples_root, load_artifact_examples
