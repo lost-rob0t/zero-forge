@@ -348,12 +348,27 @@ class ToolAgent:
                     "cve_lookup",
                     cve_id=vuln_input.cve_id,
                 )
-                ctx.cve_description = cve_data.get("description", "")
-                ctx.references = cve_data.get("references", [])
-                if cve_data.get("published"):
+                lookup_status = cve_data.get("status", "success")
+                if lookup_status == "success":
+                    ctx.cve_description = cve_data.get("description", "")
+                    ctx.references = cve_data.get("references", [])
+                    if cve_data.get("published"):
+                        ctx.extra_notes = (
+                            f"CVSS: {cve_data.get('cvss', 'N/A')}, "
+                            f"Published: {cve_data['published']}"
+                        )
+                elif lookup_status == "not_found":
                     ctx.extra_notes = (
-                        f"CVSS: {cve_data.get('cvss', 'N/A')}, "
-                        f"Published: {cve_data['published']}"
+                        "CVE lookup: not found in NVD."
+                        " Proceeding with user-supplied context only."
+                    )
+                else:
+                    error_category = cve_data.get("error_category", "unknown")
+                    error_message = cve_data.get("error_message", "")
+                    ctx.extra_notes = (
+                        f"CVE lookup failed ({error_category}): {error_message}."
+                        " Proceeding with degraded context —"
+                        " generated artifacts may lack authoritative detail."
                     )
             except (LLMCallError, ToolAgentError):
                 raise
