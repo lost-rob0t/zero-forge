@@ -451,9 +451,13 @@ def repair_artifact(
     if not code.strip():
         logger.warning("Repair produced empty code block; returning original artifact")
         return artifact
+    cfg = get_settings()
+    new_metadata = {**artifact.metadata, "repaired": True}
+    if cfg.llm.stub_mode:
+        new_metadata["stub"] = True
     return Artifact(
         artifact_type=artifact.artifact_type,
         content=code,
         filename=artifact.filename,
-        metadata={**artifact.metadata, "repaired": True},
+        metadata=new_metadata,
     )
