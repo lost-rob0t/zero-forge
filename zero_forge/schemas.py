@@ -48,6 +48,41 @@ class SourceFile(BaseModel):
     filename: str = ""
 
 
+class CveLookupStatus(StrEnum):
+    """Status of a CVE lookup attempt."""
+
+    SUCCESS = "success"
+    NOT_FOUND = "not_found"
+    RETRYABLE_FAILURE = "retryable_failure"
+    PERMANENT_FAILURE = "permanent_failure"
+
+
+class CveLookupResult(BaseModel):
+    """Typed result from a CVE lookup, separating success from failure."""
+
+    cve_id: str
+    description: str = ""
+    references: list[str] = Field(default_factory=list)
+    cvss: str = ""
+    published: str = ""
+    status: CveLookupStatus = CveLookupStatus.SUCCESS
+    error_category: str = ""
+    error_message: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a dict suitable for tool-agent consumption."""
+        return {
+            "cve_id": self.cve_id,
+            "description": self.description,
+            "references": self.references,
+            "cvss": self.cvss,
+            "published": self.published,
+            "status": self.status.value,
+            "error_category": self.error_category,
+            "error_message": self.error_message,
+        }
+
+
 class CollectedContext(BaseModel):
     """Aggregated vulnerability context after research and collection."""
 
