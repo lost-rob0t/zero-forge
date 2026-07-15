@@ -102,8 +102,19 @@ def test_reset_model_limits_cache_clears(clean_env, monkeypatch):
 
 
 class _FakeResponse:
-    def __init__(self, content: str):
-        self.choices = [type("Choice", (), {"message": type("Msg", (), {"content": content})()})()]
+    def __init__(self, content: str, finish_reason: str = "stop", reasoning_tokens: int | None = None):
+        self.choices = [type("Choice", (), {
+            "message": type("Msg", (), {"content": content})(),
+            "finish_reason": finish_reason,
+        })()]
+        if reasoning_tokens is not None:
+            self.usage = type("Usage", (), {
+                "completion_tokens_details": type("Details", (), {
+                    "reasoning_tokens": reasoning_tokens,
+                })(),
+            })()
+        else:
+            self.usage = type("Usage", (), {})()
 
 
 def test_call_model_auto_infers_max_tokens(clean_env, monkeypatch):
@@ -231,3 +242,104 @@ def test_call_model_caps_inferred_tokens(clean_env, monkeypatch):
 
     assert result == "hello"
     assert captured["max_tokens"] == 4096  # capped at custom cap
+
+
+# --- Token exhaustion retry (issue #80) ---
+
+
+def test_token_exhaustion_retries_with_doubled_max_tokens(clean_env, monkeypatch):
+    """finish_reason=length with empty content triggers retry with doubled max_tokens."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    captured = []
+
+    def fake_completion(**kwargs):
+        captured.append(dict(kwargs))
+        if len(captured) == 1:
+            return _FakeResponse(content="", finish_reason="length", reasoning_tokens=4096)
+        return _FakeResponse("hello world")
+
+    with mock.patch("litellm.completion", side_effect=fake_completion):
+        result = call_model("smart", config, "sys", "user")
+
+    assert result == "hello world"
+    assert len(captured) == 2
+    assert captured[0]["max_tokens"] == 4096
+    assert captured[1]["max_tokens"] == 8192  # doubled
+
+
+def test_token_exhaustion_non_retryable_on_stop(clean_env, monkeypatch):
+    """finish_reason=stop with empty content is non-retryable (genuine refusal)."""
+    from zero_forge.agents.llm import LLMResponseError
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    call_count = 0
+
+    def fake_completion(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return _FakeResponse(content="", finish_reason="stop")
+
+    with mock.patch("litellm.completion", side_effect=fake_completion):
+        with pytest.raises(LLMResponseError, match="empty message content"):
+            call_model("smart", config, "sys", "user")
+
+    assert call_count == 1  # no retries
+
+
+def test_token_exhaustion_all_attempts_exhausted(clean_env, monkeypatch):
+    """All retries exhausted with finish_reason=length raises retryable error."""
+    from zero_forge.agents.llm import LLMResponseError
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    captured = []
+
+    def fake_completion(**kwargs):
+        captured.append(dict(kwargs))
+        return _FakeResponse(content="", finish_reason="length", reasoning_tokens=4096)
+
+    with mock.patch("litellm.completion", side_effect=fake_completion):
+        with pytest.raises(LLMResponseError, match="Token budget exhausted") as exc_info:
+            call_model("smart", config, "sys", "user")
+
+    assert len(captured) == 3  # default max_attempts=3
+    assert exc_info.value.retryable is True
+    assert exc_info.value.attempt == 3
+
+
+def test_token_exhaustion_max_tokens_capped_at_ceiling(clean_env, monkeypatch):
+    """Doubled max_tokens is capped at _MAX_TOKENS_HARD_CEILING."""
+    from zero_forge.agents.llm import _MAX_TOKENS_HARD_CEILING
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=65536, auto_max_tokens=False)
+
+    captured = []
+
+    def fake_completion(**kwargs):
+        captured.append(dict(kwargs))
+        if len(captured) == 1:
+            return _FakeResponse(content="", finish_reason="length", reasoning_tokens=65536)
+        return _FakeResponse("hello")
+
+    with mock.patch("litellm.completion", side_effect=fake_completion):
+        result = call_model("smart", config, "sys", "user")
+
+    assert result == "hello"
+    assert captured[0]["max_tokens"] == 65536
+    assert captured[1]["max_tokens"] == _MAX_TOKENS_HARD_CEILING  # capped, not 131072
+
+
+def test_call_model_default_max_attempts_is_three(clean_env, monkeypatch):
+    """Default max_attempts is now 3 (enabling token-exhaustion retries)."""
+    import inspect
+
+    from zero_forge.agents.llm import call_model as _cm
+
+    sig = inspect.signature(_cm)
+    assert sig.parameters["max_attempts"].default == 3

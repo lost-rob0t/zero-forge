@@ -18,6 +18,8 @@ _MODEL_LIMITS_CACHE: dict[str, int | None] = {}
 
 _OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
+_MAX_TOKENS_HARD_CEILING = 131_072
+
 
 def reset_model_limits_cache() -> None:
     """Clear the session-level model limits cache (for tests)."""
@@ -193,6 +195,25 @@ def _is_retryable_provider_error(exc: Exception) -> bool:
     )
 
 
+def _safe_finish_reason(response: Any) -> str | None:
+    """Safely extract finish_reason from a LiteLLM response."""
+    try:
+        val = response.choices[0].finish_reason
+        return str(val) if val is not None else None
+    except (AttributeError, IndexError, TypeError):
+        return None
+
+
+def _safe_reasoning_tokens(response: Any) -> int | None:
+    """Extract reasoning token count from a LiteLLM response, if available."""
+    try:
+        details = response.usage.completion_tokens_details  # type: ignore[attr-defined]
+        val = details.reasoning_tokens  # type: ignore[attr-defined]
+        return int(val) if val is not None else None
+    except (AttributeError, TypeError):
+        return None
+
+
 def call_model(
     role: str,
     config: ModelConfig,
@@ -201,9 +222,14 @@ def call_model(
     *,
     additional_messages: list[dict[str, str]] | None = None,
     attempt: int = 1,
-    max_attempts: int = 1,
+    max_attempts: int = 3,
 ) -> str:
-    """Call exactly the configured role model and return non-empty text."""
+    """Call exactly the configured role model and return non-empty text.
+
+    When a reasoning model exhausts its token budget on internal reasoning
+    (``finish_reason == "length"`` with empty content), the call is retried
+    with a doubled ``max_tokens`` up to ``max_attempts`` times.
+    """
     resolved = resolve_model(role, config)
     if not resolved.api_key:
         raise LLMConfigurationError(
@@ -241,62 +267,105 @@ def call_model(
                     inferred, config.inferred_max_token_cap,
                 )
 
-    logger.trace(  # type: ignore[attr-defined]
-        "LLM request role=%s provider=%s model=%s attempt=%d/%d "
-        "max_tokens=%d system_prompt=%r user_prompt=%.500r",
-        role, resolved.provider, resolved.model, attempt, max_attempts,
-        max_tokens, system_prompt, user_prompt,
-    )
+    import litellm
 
-    try:
-        import litellm
-
-        response = litellm.completion(
-            model=resolved.model,
-            api_key=resolved.api_key,
-            messages=messages,
-            temperature=config.temperature,
-            max_tokens=max_tokens,
-            **resolved.extra_kwargs,
+    current_max_tokens = max_tokens
+    for current_attempt in range(attempt, attempt + max_attempts):
+        logger.trace(  # type: ignore[attr-defined]
+            "LLM request role=%s provider=%s model=%s attempt=%d/%d "
+            "max_tokens=%d system_prompt=%r user_prompt=%.500r",
+            role, resolved.provider, resolved.model, current_attempt,
+            max_attempts, current_max_tokens, system_prompt, user_prompt,
         )
-    except Exception as exc:
-        logger.error(
-            "LLM request failed role=%s provider=%s model=%s "
-            "error_type=%s retryable=%s",
-            role, resolved.provider, resolved.model,
-            type(exc).__name__, _is_retryable_provider_error(exc),
-        )
-        raise LLMProviderError(
-            f"LLM request failed with {type(exc).__name__}",
-            role=role,
-            provider=resolved.provider,
-            model=resolved.model,
-            retryable=_is_retryable_provider_error(exc),
-            attempt=attempt,
-            max_attempts=max_attempts,
-        ) from exc
 
-    try:
-        content = response.choices[0].message.content
-    except (AttributeError, IndexError, KeyError, TypeError) as exc:
-        logger.error(
-            "LLM response missing message role=%s provider=%s model=%s",
-            role, resolved.provider, resolved.model,
-        )
-        raise LLMResponseError(
-            "LLM response did not contain a message",
-            role=role,
-            provider=resolved.provider,
-            model=resolved.model,
-            retryable=False,
-            attempt=attempt,
-            max_attempts=max_attempts,
-        ) from exc
+        try:
+            response = litellm.completion(
+                model=resolved.model,
+                api_key=resolved.api_key,
+                messages=messages,
+                temperature=config.temperature,
+                max_tokens=current_max_tokens,
+                **resolved.extra_kwargs,
+            )
+        except Exception as exc:
+            logger.error(
+                "LLM request failed role=%s provider=%s model=%s "
+                "error_type=%s retryable=%s",
+                role, resolved.provider, resolved.model,
+                type(exc).__name__, _is_retryable_provider_error(exc),
+            )
+            raise LLMProviderError(
+                f"LLM request failed with {type(exc).__name__}",
+                role=role,
+                provider=resolved.provider,
+                model=resolved.model,
+                retryable=_is_retryable_provider_error(exc),
+                attempt=current_attempt,
+                max_attempts=max_attempts,
+            ) from exc
 
-    if not isinstance(content, str) or not content.strip():
+        try:
+            content = response.choices[0].message.content
+        except (AttributeError, IndexError, KeyError, TypeError) as exc:
+            logger.error(
+                "LLM response missing message role=%s provider=%s model=%s",
+                role, resolved.provider, resolved.model,
+            )
+            raise LLMResponseError(
+                "LLM response did not contain a message",
+                role=role,
+                provider=resolved.provider,
+                model=resolved.model,
+                retryable=False,
+                attempt=current_attempt,
+                max_attempts=max_attempts,
+            ) from exc
+
+        if isinstance(content, str) and content.strip():
+            logger.trace(  # type: ignore[attr-defined]
+                "LLM response role=%s provider=%s model=%s content=%.1000r",
+                role, resolved.provider, resolved.model, content,
+            )
+            return content
+
+        # Empty content - inspect finish_reason to decide retryability.
+        finish_reason = _safe_finish_reason(response)
+        reasoning_tokens = _safe_reasoning_tokens(response)
+        if finish_reason == "length":
+            if current_attempt < attempt + max_attempts - 1:
+                new_max = min(current_max_tokens * 2, _MAX_TOKENS_HARD_CEILING)
+                logger.warning(
+                    "LLM token exhaustion (finish_reason=length) "
+                    "role=%s provider=%s model=%s attempt=%d/%d "
+                    "max_tokens=%d reasoning_tokens=%s; retrying with %d",
+                    role, resolved.provider, resolved.model, current_attempt,
+                    max_attempts, current_max_tokens,
+                    reasoning_tokens, new_max,
+                )
+                current_max_tokens = new_max
+                continue
+            logger.error(
+                "LLM token exhaustion (finish_reason=length) after all "
+                "attempts role=%s provider=%s model=%s "
+                "max_tokens=%d reasoning_tokens=%s",
+                role, resolved.provider, resolved.model,
+                current_max_tokens, reasoning_tokens,
+            )
+            raise LLMResponseError(
+                "Token budget exhausted on reasoning "
+                f"(finish_reason=length, reasoning_tokens={reasoning_tokens})",
+                role=role,
+                provider=resolved.provider,
+                model=resolved.model,
+                retryable=True,
+                attempt=current_attempt,
+                max_attempts=max_attempts,
+            )
+
         logger.error(
-            "LLM response empty role=%s provider=%s model=%s",
-            role, resolved.provider, resolved.model,
+            "LLM response empty role=%s provider=%s model=%s "
+            "finish_reason=%s",
+            role, resolved.provider, resolved.model, finish_reason,
         )
         raise LLMResponseError(
             "LLM response contained empty message content",
@@ -304,11 +373,17 @@ def call_model(
             provider=resolved.provider,
             model=resolved.model,
             retryable=False,
-            attempt=attempt,
+            attempt=current_attempt,
             max_attempts=max_attempts,
         )
-    logger.trace(  # type: ignore[attr-defined]
-        "LLM response role=%s provider=%s model=%s content=%.1000r",
-        role, resolved.provider, resolved.model, content,
+
+    # Defensive: loop exited without returning or raising.
+    raise LLMResponseError(
+        "LLM call loop exited without producing a result",
+        role=role,
+        provider=resolved.provider,
+        model=resolved.model,
+        retryable=False,
+        attempt=attempt + max_attempts - 1,
+        max_attempts=max_attempts,
     )
-    return content
