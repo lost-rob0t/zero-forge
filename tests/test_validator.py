@@ -404,6 +404,241 @@ def test_zap_passive_ignores_forbidden_words_in_comments_and_strings():
     assert result["is_valid"] is True
 
 
+# --------------------------------------------------------------------------- #
+# 17. Active rule ordered lifecycle enforcement
+# --------------------------------------------------------------------------- #
+
+
+def _make_active_rule(
+    *,
+    swap_order: str | None = None,
+    remove_token: str | None = None,
+    no_baseline: bool = False,
+) -> str:
+    """Build a minimal valid active rule, then apply mutations for testing."""
+    baseline_line = "  const baselineBody = msg.getResponseBody().toString();"
+    if no_baseline:
+        baseline_line = ""
+    template = f'''const ScanRuleMetadata = Java.type(
+  "org.zaproxy.addon.commonlib.scanrules.ScanRuleMetadata"
+);
+
+function getMetadata() {{
+  return ScanRuleMetadata.fromYaml(`
+id: 910001
+name: Test Active Rule
+description: Test
+solution: Test
+references:
+  - https://example.invalid
+category: injection
+risk: low
+confidence: medium
+cweId: 79
+wascId: 8
+status: alpha
+`);
+}}
+
+function scan(as, msg, param, value) {{
+  if (as.isStop()) {{
+    return;
+  }}
+  {baseline_line}
+  const attack = "zf-test-abc123";
+  if (baselineBody.indexOf(attack) !== -1) {{
+    return;
+  }}
+  const probe = msg.cloneRequest();
+  as.setParam(probe, param, attack);
+  as.sendAndReceive(probe, false, false);
+  const body = probe.getResponseBody().toString();
+  if (body.indexOf(attack) === -1) {{
+    return;
+  }}
+  as.newAlert()
+    .setParam(param)
+    .setAttack(attack)
+    .setEvidence(attack)
+    .setMessage(probe)
+    .raise();
+}}
+'''
+    if swap_order == "send_before_clone":
+        template = template.replace(
+            "  const probe = msg.cloneRequest();\n  as.setParam(probe, param, attack);\n  as.sendAndReceive(probe, false, false);",
+            "  as.sendAndReceive(probe, false, false);\n  const probe = msg.cloneRequest();\n  as.setParam(probe, param, attack);",
+        )
+    elif swap_order == "send_before_setparam":
+        template = template.replace(
+            "  as.setParam(probe, param, attack);\n  as.sendAndReceive(probe, false, false);",
+            "  as.sendAndReceive(probe, false, false);\n  as.setParam(probe, param, attack);",
+        )
+    elif swap_order == "alert_before_send":
+        alert_block = """  as.newAlert()
+    .setParam(param)
+    .setAttack(attack)
+    .setEvidence(attack)
+    .setMessage(probe)
+    .raise();"""
+        template = template.replace(alert_block, "")
+        template = template.replace(
+            "  as.sendAndReceive(probe, false, false);",
+            f"  {alert_block}\n  as.sendAndReceive(probe, false, false);",
+        )
+    if remove_token:
+        template = template.replace(remove_token, "")
+    return template
+
+
+def test_active_lifecycle_ordered_passes():
+    content = _make_active_rule()
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is True, result["errors"]
+
+
+def test_active_lifecycle_send_before_clone_fails():
+    content = _make_active_rule(swap_order="send_before_clone")
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is False
+    assert any("clone the request before" in e for e in result["errors"])
+
+
+def test_active_lifecycle_send_before_setparam_fails():
+    content = _make_active_rule(swap_order="send_before_setparam")
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is False
+    assert any("setParam" in e and "sendAndReceive" in e for e in result["errors"])
+
+
+def test_active_lifecycle_alert_before_send_fails():
+    content = _make_active_rule(swap_order="alert_before_send")
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is False
+    assert any("sendAndReceive" in e and "newAlert" in e for e in result["errors"])
+
+
+def test_active_lifecycle_missing_clone_fails():
+    content = _make_active_rule(remove_token="const probe = msg.cloneRequest();")
+    content = content.replace("  const probe = ;", "  const probe = msg;")
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is False
+    assert any("clone the request" in e for e in result["errors"])
+
+
+def test_active_lifecycle_missing_sendandreceive_fails():
+    content = _make_active_rule(remove_token="as.sendAndReceive(probe, false, false);")
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is False
+    assert any("sendAndReceive" in e for e in result["errors"])
+
+
+def test_active_lifecycle_no_baseline_warns():
+    content = _make_active_rule(no_baseline=True)
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is True
+    assert any("baseline" in w for w in result["warnings"])
+
+
+def test_active_lifecycle_inspection_before_send_fails():
+    """Inspection after sendAndReceive is required; removing it must fail."""
+    content = _make_active_rule()
+    content = content.replace(
+        "  const body = probe.getResponseBody().toString();\n", ""
+    )
+    result = validate_zap_active_scan(content)
+    assert result["is_valid"] is False
+    assert any("inspect the probe response" in e for e in result["errors"])
+
+
+# --------------------------------------------------------------------------- #
+# 18. Passive rule expanded forbidden patterns
+# --------------------------------------------------------------------------- #
+
+
+def _make_passive_rule() -> str:
+    return (default_examples_root() / "zap" / "passive" / "missing_csp.js").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_passive_rejects_websocket():
+    content = _make_passive_rule()
+    content = content.replace("return;", 'const ws = new WebSocket("ws://evil"); return;')
+    result = validate_zap_passive_scan(content)
+    assert result["is_valid"] is False
+    assert any("WebSocket" in e for e in result["errors"])
+
+
+def test_passive_rejects_eventsource():
+    content = _make_passive_rule()
+    content = content.replace("return;", 'const es = new EventSource("/"); return;')
+    result = validate_zap_passive_scan(content)
+    assert result["is_valid"] is False
+    assert any("EventSource" in e for e in result["errors"])
+
+
+def test_passive_rejects_sendbeacon():
+    content = _make_passive_rule()
+    content = content.replace("return;", 'navigator.sendBeacon("/", "x"); return;')
+    result = validate_zap_passive_scan(content)
+    assert result["is_valid"] is False
+    assert any("sendBeacon" in e for e in result["errors"])
+
+
+def test_passive_rejects_importscripts():
+    content = _make_passive_rule()
+    content = content.replace("return;", 'importScripts("evil.js"); return;')
+    result = validate_zap_passive_scan(content)
+    assert result["is_valid"] is False
+    assert any("importScripts" in e for e in result["errors"])
+
+
+def test_passive_rejects_eval():
+    content = _make_passive_rule()
+    content = content.replace("return;", 'eval("sendAndReceive()"); return;')
+    result = validate_zap_passive_scan(content)
+    assert result["is_valid"] is False
+    assert any("eval" in e for e in result["errors"])
+
+
+def test_passive_rejects_function_constructor():
+    content = _make_passive_rule()
+    content = content.replace("return;", 'new Function("return sendAndReceive")(); return;')
+    result = validate_zap_passive_scan(content)
+    assert result["is_valid"] is False
+    assert any("Function" in e for e in result["errors"])
+
+
+def test_passive_rejects_java_network_class():
+    content = _make_passive_rule()
+    content = content.replace(
+        "return;",
+        'const s = Java.type("java.net.Socket"); return;'
+    )
+    result = validate_zap_passive_scan(content)
+    assert result["is_valid"] is False
+    assert any("Java network" in e for e in result["errors"])
+
+
+def test_passive_warns_on_dynamic_property_access():
+    content = _make_passive_rule()
+    content = content.replace(
+        'const policy = responseHeader.getHeader("Content-Security-Policy");',
+        'const policy = ps["getResponseHeader"]().getHeader("Content-Security-Policy");',
+    )
+    result = validate_zap_passive_scan(content)
+    assert any("bracket-notation" in w for w in result["warnings"])
+
+
+def test_passive_forbidden_in_strings_still_passes():
+    content = _make_passive_rule()
+    content += '\n// WebSocket EventSource sendBeacon importScripts eval Function\nconst note = "WebSocket EventSource";\n'
+    result = validate_zap_passive_scan(content)
+    assert result["is_valid"] is True
+    assert all("WebSocket" not in e for e in result["errors"])
+
+
 def test_zap_metadata_inside_comment_does_not_satisfy_contract():
     content = (default_examples_root() / "zap" / "passive" / "missing_csp.js").read_text(
         encoding="utf-8"

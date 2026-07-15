@@ -587,6 +587,60 @@ def _missing_tokens(code: str, requirements: dict[str, str], errors: list[str]) 
             errors.append(message)
 
 
+def _check_active_lifecycle_order(
+    code: str, errors: list[str], warnings: list[str]
+) -> None:
+    """Enforce ordered clone→mutate→probe→inspect→alert lifecycle in active rules."""
+    pos_clone = code.find("cloneRequest")
+    pos_setparam = code.find("as.setParam")
+    pos_sendrecv = code.find("as.sendAndReceive")
+    pos_newalert = code.find("as.newAlert")
+
+    if pos_clone == -1:
+        errors.append("Active rule must clone the request before mutation")
+        return
+    if pos_setparam == -1:
+        errors.append("Active rule must inject its probe with as.setParam(...)")
+        return
+    if pos_sendrecv == -1:
+        errors.append("Active rule must send its probe with as.sendAndReceive(...)")
+        return
+    if pos_newalert == -1:
+        errors.append("Active rule must create an alert with as.newAlert(...)")
+        return
+
+    if pos_setparam < pos_clone:
+        errors.append("Active rule must clone the request before calling as.setParam()")
+    if pos_sendrecv < pos_clone:
+        errors.append("Active rule must clone the request before calling as.sendAndReceive()")
+    if pos_sendrecv < pos_setparam:
+        errors.append("Active rule must call as.setParam() before as.sendAndReceive()")
+    if pos_newalert < pos_sendrecv:
+        errors.append("Active rule must call as.sendAndReceive() before as.newAlert()")
+
+    search_start = pos_sendrecv + len("as.sendAndReceive")
+    pos_resp_after = -1
+    for token in ("getResponseBody", "getResponseHeader"):
+        pos = code.find(token, search_start)
+        if pos != -1:
+            pos_resp_after = pos if pos_resp_after == -1 else min(pos_resp_after, pos)
+    if pos_resp_after == -1:
+        errors.append("Active rule must inspect the probe response after as.sendAndReceive()")
+    elif pos_resp_after > pos_newalert:
+        errors.append("Active rule must inspect the probe response before raising an alert")
+
+    pos_baseline = -1
+    for token in ("msg.getResponseBody", "msg.getResponseHeader"):
+        pos = code.find(token)
+        if pos != -1 and (pos_baseline == -1 or pos < pos_baseline):
+            pos_baseline = pos
+    if pos_baseline == -1 or pos_baseline > pos_clone:
+        warnings.append(
+            "Active rule should inspect the original response for baseline "
+            "comparison before probing"
+        )
+
+
 def validate_zap_active_scan(content: str) -> dict[str, Any]:
     """Validate a JavaScript ZAP Active Rule detection artifact."""
     if not content or not content.strip():
@@ -607,13 +661,11 @@ def validate_zap_active_scan(content: str) -> dict[str, Any]:
     ):
         errors.append("Active rule must define function scan(as, msg, param, value)")
 
+    _check_active_lifecycle_order(code, errors, warnings)
+
     _missing_tokens(
         code,
         {
-            "cloneRequest": "Active rule must clone the request before mutation",
-            "as.setParam": "Active rule must inject its probe with as.setParam(...)",
-            "as.sendAndReceive": "Active rule must send its probe with as.sendAndReceive(...)",
-            "as.newAlert": "Active rule must create an alert with as.newAlert(...)",
             ".setParam": "Active alert must identify the tested parameter",
             ".setAttack": "Active alert must record the probe value",
             ".setEvidence": "Active alert must record response evidence",
@@ -622,14 +674,37 @@ def validate_zap_active_scan(content: str) -> dict[str, Any]:
         },
         errors,
     )
-    if "getResponseBody" not in code and "getResponseHeader" not in code:
-        errors.append("Active rule must inspect the probe response")
     if not re.search(r"\bif\s*\(", code):
         errors.append("Active rule must gate its alert on a detection condition")
     if "as.isStop" not in code:
         warnings.append("Check as.isStop() before sending active probes")
 
     return {"is_valid": not errors, "errors": errors, "warnings": warnings}
+
+
+_ZAP_PASSIVE_FORBIDDEN_PATTERNS: dict[str, str] = {
+    r"\bsendAndReceive\b": "Passive rules must not send requests",
+    r"\bfetch\s*\(": "Passive rules must not call fetch",
+    r"\bXMLHttpRequest\b": "Passive rules must not use XMLHttpRequest",
+    r"\bHttpSender\b": "Passive rules must not use HttpSender",
+    r"\bURLConnection\b|\bjava\.net\b": "Passive rules must not use network APIs",
+    r"\b(?:ps|helper)\s*\.\s*setParam\s*\(": "Passive rules must not mutate parameters",
+    r"\bmsg\s*\.\s*set(?:Request|Response)": "Passive rules must not mutate messages",
+    r"\bWebSocket\b": "Passive rules must not use WebSocket",
+    r"\bEventSource\b": "Passive rules must not use EventSource",
+    r"\bnavigator\s*\.\s*sendBeacon\b": "Passive rules must not use sendBeacon",
+    r"\bimportScripts\b": "Passive rules must not use importScripts",
+    r"\beval\s*\(": "Passive rules must not use eval",
+    r"\bFunction\s*\(": "Passive rules must not use Function constructor",
+}
+
+_ZAP_JAVA_NETWORK_RE = re.compile(
+    r'''Java\.type\s*\(\s*["'`]([^"'`]*(?:Network|Socket|Http|URL))'''
+)
+
+_ZAP_DYNAMIC_ACCESS_RE = re.compile(
+    r'''\b(?:ps|helper|msg|as)\s*\['''
+)
 
 
 def validate_zap_passive_scan(content: str) -> dict[str, Any]:
@@ -675,17 +750,17 @@ def validate_zap_passive_scan(content: str) -> dict[str, Any]:
     if not re.search(r"\bif\s*\(", code):
         errors.append("Passive rule must gate its alert on a detection condition")
 
-    forbidden_patterns = {
-        r"\bsendAndReceive\b": "Passive rules must not send requests",
-        r"\bfetch\s*\(": "Passive rules must not call fetch",
-        r"\bXMLHttpRequest\b": "Passive rules must not use XMLHttpRequest",
-        r"\bHttpSender\b": "Passive rules must not use HttpSender",
-        r"\bURLConnection\b|\bjava\.net\b": "Passive rules must not use network APIs",
-        r"\b(?:ps|helper)\s*\.\s*setParam\s*\(": "Passive rules must not mutate parameters",
-        r"\bmsg\s*\.\s*set(?:Request|Response)": "Passive rules must not mutate messages",
-    }
-    for pattern, message in forbidden_patterns.items():
+    for pattern, message in _ZAP_PASSIVE_FORBIDDEN_PATTERNS.items():
         if re.search(pattern, code):
             errors.append(message)
+
+    if _ZAP_JAVA_NETWORK_RE.search(content):
+        errors.append("Passive rules must not instantiate Java network classes")
+
+    if _ZAP_DYNAMIC_ACCESS_RE.search(code):
+        warnings.append(
+            "Passive rules use bracket-notation property access on ps/helper/msg/as "
+            "which may bypass forbidden-pattern detection"
+        )
 
     return {"is_valid": not errors, "errors": errors, "warnings": warnings}

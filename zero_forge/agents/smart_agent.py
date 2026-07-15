@@ -94,19 +94,22 @@ vulnerability-specific metadata and references.
         fence_aliases=("javascript", "js"),
         filename_suffix="_zap_active.js",
         system_instructions="""\
-Write a GraalVM JavaScript Active Rule for the ZAP Script Console. Use non-destructive
-detection probes. The script must mutate only a cloned request, send the probe through
-the active helper, compare response evidence, and raise a fully populated alert.
+Write a GraalVM JavaScript Active Rule for the ZAP Script Console. An active rule
+non-destructively probes a parameter for a vulnerability indicator. The rule checks
+for stop conditions, clones the original request, injects a harmless probe value,
+sends the probe, inspects the response for vulnerability-specific evidence compared
+to the baseline, and raises a fully populated alert when evidence is found.
 """,
         contract="""\
 - Import ScanRuleMetadata and return ScanRuleMetadata.fromYaml(...) from getMetadata().
 - Metadata must include numeric id, name, description, solution, references, category,
   risk, confidence, cweId, wascId, and status.
 - Define function scan(as, msg, param, value).
-- Clone msg before mutation, call as.setParam(), then as.sendAndReceive().
-- Inspect the probe response for vulnerability-specific evidence.
-- Raise with as.newAlert().setParam().setAttack().setEvidence().setMessage().raise().
-- Use a harmless, deterministic probe and stop promptly when as.isStop() is true.
+- The scan function follows this lifecycle: check as.isStop(), clone the request,
+  inject the probe with as.setParam(), send with as.sendAndReceive(), inspect the
+  probe response, and raise an alert with as.newAlert().setParam().setAttack()
+  .setEvidence().setMessage().raise().
+- Use a harmless, deterministic probe value.
 - Output one complete JavaScript rule in a javascript code fence.
 """,
     ),
@@ -116,19 +119,19 @@ the active helper, compare response evidence, and raise a fully populated alert.
         fence_aliases=("javascript", "js"),
         filename_suffix="_zap_passive.js",
         system_instructions="""\
-Write a GraalVM JavaScript Passive Rule for the ZAP Script Console. Passive rules
-inspect an existing HTTP message only. They must never send a request, alter a request,
-or perform any other network operation.
+Write a GraalVM JavaScript Passive Rule for the ZAP Script Console. A passive rule
+inspects an existing HTTP message that has already been captured by ZAP. The rule
+examines request or response headers and bodies for vulnerability indicators and
+raises an alert with precise evidence when a finding is detected.
 """,
         contract="""\
 - Import ScanRuleMetadata and return ScanRuleMetadata.fromYaml(...) from getMetadata().
 - Metadata must include numeric id, name, description, solution, references, risk,
   confidence, cweId, wascId, and status.
 - Define function scan(ps, msg, src).
-- Inspect only msg request/response headers or bodies already supplied by ZAP.
+- Inspect msg request/response headers or bodies already supplied by ZAP.
 - Exclude irrelevant content types where appropriate and capture precise evidence.
 - Raise with ps.newAlert().setEvidence().setMessage(msg).raise().
-- Never call sendAndReceive, setParam, fetch, HttpSender, or any network API.
 - Output one complete JavaScript rule in a javascript code fence.
 """,
     ),
