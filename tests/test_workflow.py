@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
 
 from zero_forge.agents.smart_agent import LLMProviderError
 from zero_forge.schemas import CollectedContext, VulnerabilityInput, WorkflowState
@@ -23,16 +22,6 @@ def _disable_provider_keys(monkeypatch) -> None:
 
 def test_workflow_builds():
     assert build_workflow() is not None
-
-
-def test_workflow_rejects_malformed_cve_before_context_collection(monkeypatch):
-    def collect_context(*_args):
-        pytest.fail("context collection must not run")
-
-    monkeypatch.setattr("zero_forge.workflow.ToolAgent.collect_context", collect_context)
-
-    with pytest.raises(ValidationError, match="CVE ID must match"):
-        run_workflow({"cve_id": "not-a-cve"})
 
 
 def test_workflow_fails_without_credentials(tmp_path, monkeypatch):

@@ -2,26 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
-
-_CVE_ID_RE = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}$")
-
-
-def normalize_cve_id(value: object) -> str:
-    """Return the canonical CVE identifier or reject malformed input."""
-    if not isinstance(value, str):
-        raise ValueError("CVE ID must be a string")
-
-    normalized = value.strip().upper()
-    if not normalized.startswith("CVE-"):
-        normalized = f"CVE-{normalized}"
-    if not _CVE_ID_RE.fullmatch(normalized):
-        raise ValueError("CVE ID must match CVE-YYYY-NNNN with at least four final digits")
-    return normalized
+from pydantic import BaseModel, Field
 
 
 class ArtifactType(StrEnum):
@@ -40,13 +24,6 @@ class VulnerabilityInput(BaseModel):
     writeup_text: str = Field(default="", description="Vulnerability write-up or analysis")
     source_path: str | None = Field(default=None, description="Path to vulnerable source code")
     patch_diff: str = Field(default="", description="Patch or git diff as text")
-
-    @field_validator("cve_id", mode="before")
-    @classmethod
-    def validate_cve_id(cls, value: object) -> str:
-        """Normalize CVE input before any workflow state is constructed."""
-        return normalize_cve_id(value)
-
 
 class SourceFile(BaseModel):
     """A single source file inspected by the harness."""
