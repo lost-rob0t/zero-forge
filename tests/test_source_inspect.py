@@ -53,7 +53,7 @@ def test_read_source_files_max_files():
         for i in range(10):
             (Path(tmpdir) / f"file_{i}.py").write_text(f"# file {i}\n")
         results = read_source_files(tmpdir, max_files=3)
-        readable = [r for r in results if not r.get("skipped")]
+        readable = [r for r in results if not r.get("skipped") and not r.get("truncated")]
         assert len(readable) == 3
 
 
@@ -836,3 +836,114 @@ def test_search_code_unsafe_finds_symlink_file_rg(monkeypatch):
         assert any("--follow" in arg for arg in captured_args), (
             "rg command must include --follow in unsafe directory mode"
         )
+
+
+# --- Bounded source scanning tests (issue #14) --------------------------
+
+
+def test_bounded_read_stops_at_max_files():
+    """read_source_files must not read more than max_files files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(50):
+            (Path(tmpdir) / f"file_{i:02d}.py").write_text(f"# file {i}\n")
+        results = read_source_files(tmpdir, max_files=5)
+        readable = [r for r in results if not r.get("skipped") and not r.get("truncated")]
+        assert len(readable) == 5
+
+
+def test_bounded_read_reports_truncation():
+    """When there are more candidates than max_files, a truncation entry must appear."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(30):
+            (Path(tmpdir) / f"file_{i:02d}.py").write_text(f"# file {i}\n")
+        results = read_source_files(tmpdir, max_files=3)
+        truncated = [r for r in results if r.get("truncated")]
+        assert len(truncated) == 1
+        assert "budget exhausted" in truncated[0]["reason"]
+        assert "3 files read" in truncated[0]["reason"]
+
+
+def test_bounded_read_does_not_report_truncation_when_under_limit():
+    """When all candidates fit within max_files, no truncation entry should appear."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / "a.py").write_text("x = 1\n")
+        (Path(tmpdir) / "b.py").write_text("y = 2\n")
+        results = read_source_files(tmpdir, max_files=10)
+        truncated = [r for r in results if r.get("truncated")]
+        assert len(truncated) == 0
+        readable = [r for r in results if not r.get("skipped")]
+        assert len(readable) == 2
+
+
+def test_bounded_read_ranks_by_category_before_reading():
+    """Documentation files must be read before code files when budget is tight."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(20):
+            (Path(tmpdir) / f"code_{i:02d}.py").write_text(f"# code {i}\n")
+        (Path(tmpdir) / "README.md").write_text("# Important docs\n")
+        results = read_source_files(tmpdir, max_files=1)
+        readable = [r for r in results if not r.get("skipped") and not r.get("truncated")]
+        assert len(readable) == 1
+        assert readable[0]["filename"] == "README.md"
+        assert readable[0]["category"] == "documentation"
+
+
+def test_bounded_read_truncates_on_byte_budget(monkeypatch):
+    """read_source_files must stop reading when the byte budget is exhausted."""
+    import zero_forge.tools.source_inspect as si
+
+    monkeypatch.setattr(si, "_MAX_READ_BYTES", 50)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(10):
+            (Path(tmpdir) / f"file_{i:02d}.py").write_text(f"# file {i:02d} content\n")
+        results = read_source_files(tmpdir, max_files=10)
+        truncated = [r for r in results if r.get("truncated")]
+        assert len(truncated) == 1
+        readable = [r for r in results if not r.get("skipped") and not r.get("truncated")]
+        assert len(readable) < 10
+
+
+def test_bounded_read_truncates_on_traversal_candidates(monkeypatch):
+    """Directory walk must stop after _MAX_TRAVERSAL_CANDIDATES files."""
+    import zero_forge.tools.source_inspect as si
+
+    monkeypatch.setattr(si, "_MAX_TRAVERSAL_CANDIDATES", 5)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(50):
+            (Path(tmpdir) / f"file_{i:02d}.py").write_text(f"# file {i}\n")
+        results = read_source_files(tmpdir, max_files=20)
+        readable = [r for r in results if not r.get("skipped") and not r.get("truncated")]
+        assert len(readable) <= 5
+        assert len(readable) < 50
+
+
+def test_bounded_read_single_file_not_truncated():
+    """A single file input should not produce a truncation entry."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+        f.write("print('hello')\n")
+        f.flush()
+        path = f.name
+    try:
+        results = read_source_files(path, max_files=1)
+        truncated = [r for r in results if r.get("truncated")]
+        assert len(truncated) == 0
+        readable = [r for r in results if not r.get("skipped")]
+        assert len(readable) == 1
+    finally:
+        os.unlink(path)
+
+
+def test_bounded_read_skipped_still_present_with_truncation():
+    """Skipped entries must still appear alongside truncation entries."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        (Path(tmpdir) / ".env").write_text("API_KEY=secret\n")
+        for i in range(30):
+            (Path(tmpdir) / f"file_{i:02d}.py").write_text(f"# file {i}\n")
+        results = read_source_files(tmpdir, max_files=3)
+        skipped = [r for r in results if r.get("skipped")]
+        truncated = [r for r in results if r.get("truncated")]
+        assert len(skipped) >= 1
+        assert any(".env" == s.get("filename") for s in skipped)
+        assert len(truncated) == 1

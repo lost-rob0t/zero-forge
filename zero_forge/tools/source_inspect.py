@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -158,6 +159,11 @@ def _should_skip(filepath: str) -> bool:
 
 # --- Source file reading ------------------------------------------------
 
+_MAX_TRAVERSAL_CANDIDATES = 500
+_MAX_READ_BYTES = 1_048_576  # 1 MiB total across all files
+_TRAVERSAL_TIMEOUT = 10.0   # seconds for directory walk
+_READ_TIMEOUT = 10.0        # seconds for content reads
+
 def read_source_files(
     source_path: str,
     max_files: int = 20,
@@ -170,6 +176,13 @@ def read_source_files(
     documentation first so the LLM receives vulnerability context (README,
     write-ups, advisories) before source code.
 
+    Traversal and content reads are **bounded**: the directory walk stops
+    after ``_MAX_TRAVERSAL_CANDIDATES`` candidates or ``_TRAVERSAL_TIMEOUT``
+    seconds.  Content reads stop after ``max_files`` files or
+    ``_MAX_READ_BYTES`` total bytes or ``_READ_TIMEOUT`` seconds.  If the
+    budget is exhausted before all candidates are read, a truncation
+    entry is appended to the results.
+
     When *unsafe* is False (default), the function:
       - Never follows symlinks.
       - Excludes known secret/credential files and patterns.
@@ -179,7 +192,8 @@ def read_source_files(
         with ``"skipped": True`` and ``"reason"`` keys.
 
     When *unsafe* is True, all safety checks are bypassed and every
-    eligible file is read (legacy behaviour).
+    eligible file is read (legacy behaviour, still bounded by the same
+    budgets).
     """
     raw_source = Path(source_path)
     if not unsafe and raw_source.is_symlink():
@@ -196,27 +210,40 @@ def read_source_files(
         return []
 
     if base.is_file():
-        files: list[Path] = [base]
+        all_files: list[Path] = [base]
     else:
-        files = []
+        all_files = []
+        walk_start = time.monotonic()
         for root, dirs, filenames in os.walk(base):
             dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
             for fname in sorted(filenames):
-                files.append(Path(root) / fname)
+                all_files.append(Path(root) / fname)
+                if len(all_files) >= _MAX_TRAVERSAL_CANDIDATES:
+                    break
+            if len(all_files) >= _MAX_TRAVERSAL_CANDIDATES:
+                break
+            if time.monotonic() - walk_start > _TRAVERSAL_TIMEOUT:
+                break
 
     results: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
 
     # Pre-load gitignore patterns for safe mode.
     gitignore_patterns: list[re.Pattern[str]] = []
     if not unsafe and base.is_dir():
         gitignore_patterns = _load_gitignore(base)
 
-    for fpath in files:
+    # Phase 1: Collect candidate metadata without reading content.
+    # Rank by category priority before reading to ensure the most relevant
+    # files (documentation, config) are read first within the budget.
+    candidates: list[dict[str, Any]] = []
+
+    for fpath in all_files:
         # --- Safe-mode checks (skipped entirely in unsafe mode) ---
         if not unsafe:
             # 1. Never follow symlinks.
             if fpath.is_symlink():
-                results.append({
+                skipped.append({
                     "path": str(fpath),
                     "filename": fpath.name,
                     "skipped": True,
@@ -228,7 +255,7 @@ def read_source_files(
             try:
                 resolved = fpath.resolve()
                 if not str(resolved).startswith(str(base)):
-                    results.append({
+                    skipped.append({
                         "path": str(fpath),
                         "filename": fpath.name,
                         "skipped": True,
@@ -236,7 +263,7 @@ def read_source_files(
                     })
                     continue
             except OSError:
-                results.append({
+                skipped.append({
                     "path": str(fpath),
                     "filename": fpath.name,
                     "skipped": True,
@@ -246,7 +273,7 @@ def read_source_files(
 
             # 3. Exclude known secret/credential files.
             if _is_secret_file(str(fpath)):
-                results.append({
+                skipped.append({
                     "path": str(fpath),
                     "filename": fpath.name,
                     "skipped": True,
@@ -260,7 +287,7 @@ def read_source_files(
             except ValueError:
                 rel = str(fpath)
             if _is_gitignored(rel, gitignore_patterns):
-                results.append({
+                skipped.append({
                     "path": str(fpath),
                     "filename": fpath.name,
                     "skipped": True,
@@ -275,25 +302,64 @@ def read_source_files(
             size = fpath.stat().st_size
             if size > max_file_size:
                 continue
-            raw = fpath.read_text(encoding="utf-8", errors="replace")
-            if "\x00" in raw:
-                continue
             category = _categorize_file(str(fpath))
-            results.append({
+            candidates.append({
                 "path": str(fpath),
-                "content": raw,
+                "filename": fpath.name,
                 "language": _detect_language(str(fpath)),
                 "category": category,
-                "filename": fpath.name,
+                "size": size,
+                "_fpath": fpath,
             })
         except OSError:
             continue
 
-    # Sort only non-skipped results; skipped entries go at the end.
-    non_skipped = [r for r in results if not r.get("skipped")]
-    skipped = [r for r in results if r.get("skipped")]
-    non_skipped.sort(key=lambda r: (_CATEGORY_PRIORITY.get(r["category"], 99), r["path"]))
-    return non_skipped[:max_files] + skipped
+    # Rank candidates by category priority then path, before reading content.
+    candidates.sort(key=lambda c: (_CATEGORY_PRIORITY.get(c["category"], 99), c["path"]))
+
+    # Phase 2: Read content for only the top max_files candidates,
+    # bounded by total bytes and time.
+    total_bytes = 0
+    read_start = time.monotonic()
+    truncated = False
+
+    for cand in candidates:
+        if len(results) >= max_files:
+            truncated = True
+            break
+        if total_bytes + cand["size"] > _MAX_READ_BYTES:
+            truncated = True
+            break
+        if time.monotonic() - read_start > _READ_TIMEOUT:
+            truncated = True
+            break
+        try:
+            raw = cand["_fpath"].read_text(encoding="utf-8", errors="replace")
+            if "\x00" in raw:
+                continue
+            total_bytes += len(raw)
+            results.append({
+                "path": cand["path"],
+                "content": raw,
+                "language": cand["language"],
+                "category": cand["category"],
+                "filename": cand["filename"],
+            })
+        except OSError:
+            continue
+
+    if truncated:
+        results.append({
+            "path": "<budget>",
+            "filename": "<budget>",
+            "truncated": True,
+            "reason": (
+                f"Source scanning budget exhausted: {len(results)} files read, "
+                f"{total_bytes} bytes, {len(candidates)} candidates found"
+            ),
+        })
+
+    return results + skipped
 
 
 def search_code(
