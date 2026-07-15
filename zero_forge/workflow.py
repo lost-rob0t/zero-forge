@@ -9,12 +9,16 @@ from langgraph.graph.state import CompiledStateGraph
 
 from .agents.smart_agent import LLMCallError, generate_artifact, repair_artifact
 from .agents.tool_agent import ToolAgent, ToolAgentError
+from .logging_config import get_logger
 from .schemas import WorkflowError, WorkflowState
 from .tools.validator import ValidatorRuntimeUnavailable, require_ruby_runtime
+
+logger = get_logger(__name__)
 
 
 def collect_context_node(state: WorkflowState) -> dict[str, Any]:
     """Node: collect vulnerability context using the Tool Agent."""
+    logger.info("Collecting context for CVE %s", state.vuln_input.cve_id)
     agent = ToolAgent()
     try:
         ctx = agent.collect_context(state.vuln_input)
@@ -45,6 +49,7 @@ def collect_context_node(state: WorkflowState) -> dict[str, Any]:
 
 def generate_artifact_node(state: WorkflowState) -> dict[str, Any]:
     """Node: Smart Agent generates the initial artifact."""
+    logger.info("Generating artifact")
     if state.context is None:
         return {"error": "No context available for generation", "status": "error"}
     try:
@@ -73,6 +78,7 @@ def generate_artifact_node(state: WorkflowState) -> dict[str, Any]:
 
 def validate_artifact_node(state: WorkflowState) -> dict[str, Any]:
     """Node: Tool Agent validates the generated artifact."""
+    logger.info("Validating artifact")
     if state.artifact is None:
         return {"error": "No artifact to validate", "status": "error"}
     agent = ToolAgent()
@@ -108,6 +114,11 @@ def validate_artifact_node(state: WorkflowState) -> dict[str, Any]:
 
 def repair_artifact_node(state: WorkflowState) -> dict[str, Any]:
     """Node: Smart Agent repairs the artifact based on validation errors."""
+    logger.info(
+        "Repairing artifact (attempt %d/%d)",
+        state.repair_attempts + 1,
+        state.max_repair_attempts,
+    )
     if state.artifact is None or state.validation is None or state.context is None:
         return {"error": "Missing data for repair", "status": "error"}
     repair_context = state.context.model_copy()
@@ -135,6 +146,7 @@ def save_artifact_node(state: WorkflowState) -> dict[str, Any]:
     or invalid, this node should not have been reached; we guard defensively
     by returning a failed status instead of saving.
     """
+    logger.info("Saving validated artifact")
     if state.validation is None:
         return {"error": "Missing validation result", "status": "failed"}
     if not state.validation.is_valid:
@@ -150,6 +162,7 @@ def save_artifact_node(state: WorkflowState) -> dict[str, Any]:
         return {"error": "Refusing to save a stub artifact as completed", "status": "failed"}
     from .output import save_artifact
     output_path = save_artifact(state.artifact)
+    logger.info("Artifact saved to %s", output_path)
     return {"output_path": output_path, "status": "completed"}
 
 
@@ -242,6 +255,7 @@ def build_workflow() -> CompiledStateGraph[WorkflowState, None, WorkflowState, W
 
 def run_workflow(vuln_input) -> WorkflowState:
     """Convenience: build and run the workflow with given input."""
+    logger.info("Starting workflow")
     from .config import get_settings
     from .schemas import VulnerabilityInput
     if isinstance(vuln_input, dict):

@@ -10,7 +10,10 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import get_settings
+from .logging_config import get_logger
 from .schemas import Artifact
+
+logger = get_logger(__name__)
 
 # CVE ID pattern: CVE-YYYY-NNNN+
 _CVE_ID_RE = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}$")
@@ -183,6 +186,7 @@ def save_artifact(artifact: Artifact, output_dir: Path | str | None = None) -> s
     out_path.mkdir(parents=True, exist_ok=True)
 
     filename = artifact.filename or f"artifact_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    logger.debug("Saving artifact %s to %s", filename, out_path)
     filepath = _safe_resolve(out_path, filename)
 
     # Metadata sidecar: derive name from validated filepath and apply same protection

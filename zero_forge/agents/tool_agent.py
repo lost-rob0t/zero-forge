@@ -10,6 +10,7 @@ from typing import Any, cast, get_type_hints
 from pydantic import ConfigDict, ValidationError, create_model
 
 from ..config import get_settings
+from ..logging_config import get_logger
 from ..schemas import (
     CollectedContext,
     SourceFile,
@@ -21,6 +22,8 @@ from ..schemas import (
 )
 from ..tools.registry import ToolRegistry, create_default_registry
 from .llm import LLMCallError, LLMResponseError, call_model, resolve_model
+
+logger = get_logger(__name__)
 
 TOOL_SYSTEM_PROMPT = """\
 You are ZeroForge's Tool Agent. You only select one allowed registered tool and
@@ -302,6 +305,7 @@ class ToolAgent:
 
     def collect_context(self, vuln_input: VulnerabilityInput) -> CollectedContext:
         """Collect vulnerability context through bounded Tool Agent calls."""
+        logger.debug("Collecting context for CVE %s", vuln_input.cve_id)
         ctx = CollectedContext(
             cve_id=vuln_input.cve_id,
             poc_text=vuln_input.poc_text,
@@ -405,6 +409,7 @@ class ToolAgent:
         artifact_type: str = "metasploit",
     ) -> ValidationResult:
         """Select and execute the registered validator for an artifact type."""
+        logger.debug("Validating artifact type=%s", artifact_type)
         tool_name = f"validate_{artifact_type}"
         if not self.registry.has(tool_name):
             return ValidationResult(

@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 
 from ..config import get_settings
+from ..logging_config import get_logger
 from ..schemas import (
     Artifact,
     ArtifactType,
@@ -21,6 +22,8 @@ from .llm import (
     call_model,
     resolve_model,
 )
+
+logger = get_logger(__name__)
 
 __all__ = [
     "LLMCallError",
@@ -262,9 +265,12 @@ def _check_refusal(code: str, phase: str) -> str:
 
 
 def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext) -> Artifact:
+    logger.info("Generating artifact for CVE %s", context.cve_id)
+    logger.debug("Building context prompt for CVE %s", context.cve_id)
     prompt = _build_context_prompt(vuln_input, context)
     raw = _call_llm(SYSTEM_PROMPT, prompt)
     code = _extract_code_block(raw)
+    logger.debug("Extracted code block: %d chars", len(code))
     code = _check_refusal(code, "generation")
     cfg = get_settings()
     return Artifact(
@@ -287,11 +293,18 @@ def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext)
 def repair_artifact(
     artifact: Artifact, validation: ValidationResult, context: CollectedContext
 ) -> Artifact:
+    logger.info(
+        "Repairing artifact (%d validation errors)",
+        len(validation.errors),
+    )
     prompt = _build_repair_prompt(artifact, validation)
     raw = _call_llm(SYSTEM_PROMPT, prompt)
     code = _extract_code_block(raw)
     if _is_refusal(code):
         _check_refusal(code, "repair")
+        return artifact
+    if not code.strip():
+        logger.warning("Repair produced empty code block; returning original artifact")
         return artifact
     return Artifact(
         artifact_type=artifact.artifact_type,
