@@ -199,6 +199,17 @@ def test_missing_validation_produces_failed():
     assert should_repair_or_finish(state) == "fail"
 
 
+def test_validator_runtime_failure_is_not_repaired():
+    state = _make_state(
+        validation=ValidationResult(
+            is_valid=False,
+            errors=["Ruby is unavailable"],
+            runtime_error=True,
+        )
+    )
+    assert should_repair_or_finish(state) == "fail"
+
+
 def test_save_node_rejects_missing_validation():
     """save_artifact_node returns failed when validation is None."""
     state = _make_state(validation=None)

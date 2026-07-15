@@ -10,6 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 from .agents.smart_agent import LLMCallError, generate_artifact, repair_artifact
 from .agents.tool_agent import ToolAgent
 from .schemas import WorkflowError, WorkflowState
+from .tools.validator import ValidatorRuntimeUnavailable, require_ruby_runtime
 
 
 def collect_context_node(state: WorkflowState) -> dict[str, Any]:
@@ -129,6 +130,8 @@ def should_repair_or_finish(state: WorkflowState) -> str:
         return "fail"
     if state.validation.is_valid:
         return "save"
+    if state.validation.runtime_error:
+        return "fail"
     if state.repair_attempts >= state.max_repair_attempts:
         return "fail"
     return "repair"
@@ -183,11 +186,25 @@ def run_workflow(vuln_input) -> WorkflowState:
     from .schemas import VulnerabilityInput
     if isinstance(vuln_input, dict):
         vuln_input = VulnerabilityInput(**vuln_input)
-    app = build_workflow()
     initial_state = WorkflowState(
         vuln_input=vuln_input,
         max_repair_attempts=get_settings().workflow.max_repair_attempts,
     )
+    try:
+        require_ruby_runtime()
+    except ValidatorRuntimeUnavailable as exc:
+        message = str(exc)
+        return initial_state.model_copy(
+            update={
+                "error": message,
+                "failure": WorkflowError(
+                    code="validator_runtime_unavailable",
+                    message=message,
+                ),
+                "status": "failed",
+            }
+        )
+    app = build_workflow()
     result = app.invoke(initial_state)
     if isinstance(result, WorkflowState):
         return result

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -18,6 +19,23 @@ META_REQUIRED_KEYS = {
 }
 
 RUBY_TIMEOUT = 10.0
+RUBY_VERSION = "3.3.8"
+RUBY_UNAVAILABLE_ERROR = (
+    f"Ruby {RUBY_VERSION} is required for Metasploit validation but was not found "
+    "on PATH; install Ruby 3.3.8 and retry"
+)
+
+
+class ValidatorRuntimeUnavailable(RuntimeError):
+    """Raised when a required external validator runtime is unavailable."""
+
+
+def require_ruby_runtime(ruby_executable: str = "ruby") -> str:
+    """Return the Ruby executable path or raise one actionable preflight error."""
+    path = shutil.which(ruby_executable)
+    if path is None:
+        raise ValidatorRuntimeUnavailable(RUBY_UNAVAILABLE_ERROR)
+    return path
 
 # Ruby AST analysis script using the standard-library Ripper parser.
 # Walks the Ripper sexp to verify that required structural elements exist
@@ -223,20 +241,23 @@ def validate_metasploit(
     except FileNotFoundError:
         return {
             "is_valid": False,
-            "errors": ["Ruby executable not found; cannot validate module"],
+            "errors": [RUBY_UNAVAILABLE_ERROR],
             "warnings": [],
+            "runtime_error": True,
         }
     except subprocess.TimeoutExpired:
         return {
             "is_valid": False,
             "errors": ["Ruby syntax check timed out"],
             "warnings": [],
+            "runtime_error": True,
         }
     except Exception as e:
         return {
             "is_valid": False,
             "errors": [f"Ruby syntax check failed: {e}"],
             "warnings": [],
+            "runtime_error": True,
         }
 
     if returncode != 0:
@@ -253,20 +274,23 @@ def validate_metasploit(
     except FileNotFoundError:
         return {
             "is_valid": False,
-            "errors": ["Ruby executable not found; cannot validate module"],
+            "errors": [RUBY_UNAVAILABLE_ERROR],
             "warnings": [],
+            "runtime_error": True,
         }
     except subprocess.TimeoutExpired:
         return {
             "is_valid": False,
             "errors": ["Ruby AST analysis timed out"],
             "warnings": [],
+            "runtime_error": True,
         }
     except Exception as e:
         return {
             "is_valid": False,
             "errors": [f"Ruby AST analysis failed: {e}"],
             "warnings": [],
+            "runtime_error": True,
         }
 
     if not ast.get("parseable", False):
