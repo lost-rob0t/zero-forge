@@ -12,6 +12,11 @@ dependencies = [
     "pydantic>=2.0",
     "typer>=0.9",
     "litellm>=1.0",
+    # litellm 1.92+ bundles a Rust extension built with PyO3 0.23.5, which
+    # caps at Python 3.13.  On 3.14+ the source build fails.  Pin below the
+    # Rust-bridge release until litellm officially supports 3.14.
+    # See https://github.com/lost-rob0t/zero-forge/issues/101
+    "litellm<1.92; python_version>='3.14'",
     "pyyaml>=6.0",
 ]
 
