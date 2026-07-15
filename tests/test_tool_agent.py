@@ -97,6 +97,35 @@ def test_tool_agent_collect_context_offline(monkeypatch):
     assert context.writeup_text == "Test writeup"
 
 
+def test_tool_agent_collect_context_skips_cve_lookup_when_empty(monkeypatch):
+    """Source-only workflow: cve_lookup is skipped when cve_id is empty (issue #68)."""
+    _stub_selection(monkeypatch)
+    lookup_called = []
+
+    registry = ToolRegistry()
+    registry.register(
+        "cve_lookup",
+        lambda cve_id, timeout=15: lookup_called.append(cve_id) or {
+            "cve_id": cve_id,
+            "description": "",
+            "references": [],
+            "cvss": "",
+            "published": "",
+        },
+    )
+    context = ToolAgent(registry).collect_context(
+        VulnerabilityInput(
+            cve_id="",
+            poc_text="print('pwned')",
+            writeup_text="Test writeup",
+        )
+    )
+    assert context.cve_id == ""
+    assert lookup_called == []
+    assert context.poc_text == "print('pwned')"
+    assert context.writeup_text == "Test writeup"
+
+
 def test_tool_agent_uses_only_tool_model(monkeypatch):
     captured = {}
 

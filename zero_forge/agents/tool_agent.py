@@ -313,23 +313,24 @@ class ToolAgent:
             patch_diff=vuln_input.patch_diff,
         )
 
-        try:
-            cve_data = self._call_tool(
-                "Look up authoritative context for the supplied CVE",
-                "cve_lookup",
-                cve_id=vuln_input.cve_id,
-            )
-            ctx.cve_description = cve_data.get("description", "")
-            ctx.references = cve_data.get("references", [])
-            if cve_data.get("published"):
-                ctx.extra_notes = (
-                    f"CVSS: {cve_data.get('cvss', 'N/A')}, "
-                    f"Published: {cve_data['published']}"
+        if vuln_input.cve_id:
+            try:
+                cve_data = self._call_tool(
+                    "Look up authoritative context for the supplied CVE",
+                    "cve_lookup",
+                    cve_id=vuln_input.cve_id,
                 )
-        except (LLMCallError, ToolAgentError):
-            raise
-        except Exception as exc:
-            ctx.extra_notes = f"CVE lookup failed: {exc}"
+                ctx.cve_description = cve_data.get("description", "")
+                ctx.references = cve_data.get("references", [])
+                if cve_data.get("published"):
+                    ctx.extra_notes = (
+                        f"CVSS: {cve_data.get('cvss', 'N/A')}, "
+                        f"Published: {cve_data['published']}"
+                    )
+            except (LLMCallError, ToolAgentError):
+                raise
+            except Exception as exc:
+                ctx.extra_notes = f"CVE lookup failed: {exc}"
 
         unsafe = False
         admitted_paths: list[str] = []
