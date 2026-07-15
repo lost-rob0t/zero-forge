@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from ..config import get_settings
 from ..schemas import (
     Artifact,
@@ -54,7 +56,10 @@ Always output the complete module code in a single code block.
 
 def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> str:
     parts: list[str] = []
-    parts.append(f"## CVE: {ctx.cve_id}")
+    if ctx.cve_id:
+        parts.append(f"## CVE: {ctx.cve_id}")
+    else:
+        parts.append("## Source-Only Analysis (No CVE Identifier)")
     if ctx.cve_description:
         parts.append(f"### Description\n{ctx.cve_description}")
     if ctx.affected_versions:
@@ -197,7 +202,11 @@ def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext)
     return Artifact(
         artifact_type=ArtifactType.METASPLOIT,
         content=code,
-        filename=f"{context.cve_id.lower().replace('-', '_')}_exploit.rb",
+        filename=(
+            f"{context.cve_id.lower().replace('-', '_')}_exploit.rb"
+            if context.cve_id
+            else f"exploit_{datetime.now().strftime('%Y%m%d_%H%M%S')}.rb"
+        ),
         metadata={
             "model": cfg.models.smart.model,
             "model_role": "smart",

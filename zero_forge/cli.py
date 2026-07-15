@@ -22,7 +22,12 @@ console = Console()
 
 @app.command()
 def generate(
-    cve_id: str = typer.Option(..., "--cve", "-c", help="CVE identifier (e.g. CVE-2021-44228)"),
+    cve_id: str = typer.Option(
+        "",
+        "--cve",
+        "-c",
+        help="CVE identifier (e.g. CVE-2021-44228). Optional for source-only analysis.",
+    ),
     poc_file: str = typer.Option("", "--poc", "-p", help="Path to proof-of-concept file"),
     writeup_file: str = typer.Option("", "--writeup", "-w", help="Path to vulnerability write-up"),
     source_path: str = typer.Option("", "--source", "-s", help="Path to vulnerable source code"),
@@ -44,7 +49,8 @@ def generate(
 
     get_settings()
 
-    console.print(f"[bold]ZeroForge[/] — generating artifact for {cve_id}")
+    label = cve_id or "source-only analysis (no CVE)"
+    console.print(f"[bold]ZeroForge[/] — generating artifact for {label}")
 
     def _read(path: str) -> str:
         return Path(path).read_text(encoding="utf-8", errors="replace") if path else ""
@@ -79,7 +85,7 @@ def generate(
     table.add_column("Field", style="cyan")
     table.add_column("Value")
     table.add_row("Status", result.status)
-    table.add_row("CVE", vuln_input.cve_id)
+    table.add_row("CVE", vuln_input.cve_id or "(none)")
     if result.output_path:
         table.add_row("Output", result.output_path)
     if result.validation:

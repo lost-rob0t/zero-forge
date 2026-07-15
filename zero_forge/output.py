@@ -29,7 +29,7 @@ _EXCLUSIVE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLO
 def _validate_cve_id(artifact: Artifact) -> None:
     """Validate CVE ID format if present in artifact metadata."""
     cve_id = artifact.metadata.get("cve_id")
-    if cve_id is not None and not _CVE_ID_RE.match(str(cve_id)):
+    if cve_id is not None and str(cve_id) != "" and not _CVE_ID_RE.match(str(cve_id)):
         raise ArtifactPathError(f"Invalid CVE ID: {cve_id!r}")
 
 
