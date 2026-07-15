@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 from collections.abc import Callable
-from typing import Any, get_type_hints
+from typing import Any, cast, get_type_hints
 
 from pydantic import ConfigDict, ValidationError, create_model
 
@@ -40,6 +40,13 @@ class ToolSelectionError(ToolAgentError):
 
 class ToolCallValidationError(ToolAgentError):
     """Raised before execution when tool arguments do not match the callable."""
+
+
+_REPAIRABLE_SELECTION_ERRORS = (
+    LLMResponseError,
+    ToolSelectionError,
+    ToolCallValidationError,
+)
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
@@ -82,14 +89,27 @@ class ToolAgent:
     def __init__(self, registry: ToolRegistry | None = None) -> None:
         self.registry = registry or create_default_registry()
 
-    def select_tool_call(self, request: ToolRequest) -> ToolCall:
-        settings = get_settings()
+    def _validate_request_allowlist(self, request: ToolRequest) -> list[str]:
+        """Return the normalized allowlist after checking registered tools."""
         available = set(self.registry.names())
         allowed = sorted(set(request.allowed_tools))
         if not allowed or any(name not in available for name in allowed):
             raise ToolSelectionError("Tool request contains an unregistered tool")
+        return allowed
+
+    def _select_once(
+        self,
+        request: ToolRequest,
+        allowed: list[str],
+        corrective_messages: list[dict[str, str]],
+        *,
+        attempt: int,
+        max_attempts: int,
+    ) -> str | None:
+        """Make one bounded Tool-model selection attempt."""
+        settings = get_settings()
         if settings.llm.stub_mode:
-            return ToolCall(name=allowed[0], arguments=request.arguments)
+            return None
 
         user_prompt = json.dumps(
             {
@@ -99,21 +119,102 @@ class ToolAgent:
             },
             sort_keys=True,
         )
-        raw = call_model("tool", settings.models.tool, TOOL_SYSTEM_PROMPT, user_prompt)
+        return call_model(
+            "tool",
+            settings.models.tool,
+            TOOL_SYSTEM_PROMPT,
+            user_prompt,
+            additional_messages=corrective_messages,
+            attempt=attempt,
+            max_attempts=max_attempts,
+        )
+
+    @staticmethod
+    def _parse_tool_call(
+        raw: str,
+        allowed: list[str],
+        *,
+        attempt: int,
+        max_attempts: int,
+    ) -> ToolCall:
+        settings = get_settings()
         resolved = resolve_model("tool", settings.models.tool)
         try:
             call = ToolCall.model_validate(_extract_json_object(raw))
         except (json.JSONDecodeError, ValidationError, ValueError) as exc:
             raise LLMResponseError(
-                "Tool Agent response was not a strict ToolCall",
+                f"Tool Agent response was not a strict ToolCall: {exc}",
                 role="tool",
                 provider=resolved.provider,
                 model=resolved.model,
                 retryable=False,
+                attempt=attempt,
+                max_attempts=max_attempts,
             ) from exc
         if call.name not in allowed:
             raise ToolSelectionError(f"Tool Agent selected disallowed tool '{call.name}'")
         return call
+
+    @staticmethod
+    def _corrective_message(exc: Exception) -> str:
+        return (
+            f"Your previous ToolCall was rejected: {exc}. Correct the error and return "
+            "only one strict JSON object with an allowed registered tool name and "
+            "arguments that match that tool's callable signature."
+        )
+
+    def _select_with_repairs(
+        self,
+        request: ToolRequest,
+        *,
+        execute: bool,
+    ) -> ToolCall | ToolResult:
+        """Select, optionally validate/execute, and repair boundary failures."""
+        settings = get_settings()
+        allowed = self._validate_request_allowlist(request)
+        max_attempts = 1 if settings.llm.stub_mode else 1 + settings.workflow.max_repair_attempts
+        corrective_messages: list[dict[str, str]] = []
+
+        for attempt in range(1, max_attempts + 1):
+            raw: str | None = None
+            try:
+                raw = self._select_once(
+                    request,
+                    allowed,
+                    corrective_messages,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                )
+                call = (
+                    ToolCall(name=allowed[0], arguments=request.arguments)
+                    if raw is None
+                    else self._parse_tool_call(
+                        raw,
+                        allowed,
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                    )
+                )
+                if not execute:
+                    self._validated_arguments(call, allowed_tools=allowed)
+                    return call
+                return self.execute_tool_call(call, allowed_tools=allowed)
+            except _REPAIRABLE_SELECTION_ERRORS as exc:
+                if attempt >= max_attempts:
+                    raise
+                if raw:
+                    corrective_messages.append({"role": "assistant", "content": raw})
+                corrective_messages.append(
+                    {"role": "user", "content": self._corrective_message(exc)}
+                )
+
+        raise AssertionError("Tool selection loop exited without a result")
+
+    def select_tool_call(self, request: ToolRequest) -> ToolCall:
+        result = self._select_with_repairs(request, execute=False)
+        if not isinstance(result, ToolCall):
+            raise AssertionError("Tool selection returned an unexpected result")
+        return result
 
     def execute_tool_call(
         self,
@@ -121,19 +222,7 @@ class ToolAgent:
         *,
         allowed_tools: list[str] | None = None,
     ) -> ToolResult:
-        if allowed_tools is not None and call.name not in allowed_tools:
-            raise ToolSelectionError(f"Tool call is outside the request allowlist: {call.name}")
-        if not self.registry.has(call.name):
-            raise ToolSelectionError(f"Tool is not registered: {call.name}")
-
-        func = self.registry.get(call.name)
-        arguments_model = _argument_model(call.name, func)
-        try:
-            arguments = arguments_model.model_validate(call.arguments).model_dump()
-        except ValidationError as exc:
-            raise ToolCallValidationError(
-                f"Invalid arguments for registered tool '{call.name}'"
-            ) from exc
+        arguments = self._validated_arguments(call, allowed_tools=allowed_tools)
 
         resolved = resolve_model("tool", get_settings().models.tool)
         try:
@@ -154,9 +243,34 @@ class ToolAgent:
             model=resolved.model,
         )
 
+    def _validated_arguments(
+        self,
+        call: ToolCall,
+        *,
+        allowed_tools: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Validate a selected call without executing its registered tool."""
+        if allowed_tools is not None and call.name not in allowed_tools:
+            raise ToolSelectionError(f"Tool call is outside the request allowlist: {call.name}")
+        if not self.registry.has(call.name):
+            raise ToolSelectionError(f"Tool is not registered: {call.name}")
+
+        func = self.registry.get(call.name)
+        arguments_model = _argument_model(call.name, func)
+        try:
+            arguments = arguments_model.model_validate(call.arguments).model_dump()
+        except ValidationError as exc:
+            raise ToolCallValidationError(
+                f"Invalid arguments for registered tool '{call.name}': "
+                f"{exc.errors(include_url=False)}"
+            ) from exc
+        return cast(dict[str, Any], arguments)
+
     def run(self, request: ToolRequest) -> ToolResult:
-        call = self.select_tool_call(request)
-        return self.execute_tool_call(call, allowed_tools=request.allowed_tools)
+        result = self._select_with_repairs(request, execute=True)
+        if not isinstance(result, ToolResult):
+            raise AssertionError("Tool execution returned an unexpected result")
+        return result
 
     def _call_tool(self, objective: str, name: str, **arguments: Any) -> Any:
         result = self.run(
