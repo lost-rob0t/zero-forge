@@ -9,6 +9,19 @@
 - `wiki/` is the canonical source for GitHub Wiki pages.
 - `research/` contains dated research notes, not approved implementation work.
 
+## Steward branch
+
+The Project Steward uses the single long-lived branch named exactly `docs`. It never
+creates a per-run steward branch or writes to any other branch. At the start of each run:
+
+1. refresh remote `master` and `docs`;
+2. bring current `master` into `docs` with a normal, non-force update;
+3. stop and report any conflict instead of rewriting shared history;
+4. open or update the single draft pull request from `docs` to `master`.
+
+Other branches may be read for coordination only. The steward never commits to
+`master`, force-pushes, merges, or enables auto-merge.
+
 ## Steward run order
 
 1. Record the UTC and operator-timezone run window.
@@ -17,12 +30,18 @@
 4. Inspect new `master` commits and update documentation for behavior changes.
 5. Reconcile repository wiki sources and the GitHub Wiki.
 6. Improve idempotent helpers under `dev_scripts/`.
-7. Validate, commit on a fresh branch, and open or update one draft PR.
+7. Validate, commit on `docs`, and open or update its single draft PR.
 8. Only then research new possibilities and store cited notes under `research/`.
 9. Finalize the Org run entry only after remote writes are confirmed.
 
-Never commit to `master`, reuse another agent's branch, merge, enable auto-merge, or
-advance a successful-run cursor before the run is actually complete.
+Never advance a successful-run cursor before the run is actually complete.
+
+## Dependency maintenance
+
+Dependabot is configured for Python packages and GitHub Actions. GitHub Actions upgrades
+remain ordinary pull requests and must pass the same current-head merge gate. The CI and
+release workflows currently use the maintained major versions of checkout, setup-python,
+upload-artifact, and the release action; Dependabot should own subsequent routine bumps.
 
 ## Helper commands
 
@@ -47,7 +66,8 @@ credentials; helpers never print credentials.
 
 ## Validation gate
 
-Run the focused checks for changed helpers, followed by:
+For documentation-only updates, inspect the complete Markdown and final diff. For helper
+or code changes, run the focused checks followed by:
 
 ```bash
 pytest tests/ -q
