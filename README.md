@@ -45,7 +45,7 @@ zero_forge/
     ├── cve_lookup.py    # NVD API CVE lookup
     ├── source_inspect.py # Source reading, code search, git diff
     └── validator.py     # Metasploit and ZAP artifact validation
-llm_examples/
+zero_forge/llm_examples/
 ├── metasploit/         # Complete Ruby module references
 └── zap/
     ├── active/         # Active detection-rule references
@@ -155,7 +155,7 @@ sorted, loaded whole, and bounded by both count and total character budget; over
 files are skipped instead of truncated. Initial generation and every repair attempt
 also receive an explicit structural contract.
 
-The examples in `llm_examples/` are original reference artifacts informed by the
+The examples in `zero_forge/llm_examples/` are original reference artifacts informed by the
 [ZAP active and passive script templates](https://github.com/zaproxy/community-scripts/tree/main)
 and the
 [Metasploit module development guides](https://docs.metasploit.com/docs/development/developing-modules/guides/get-started-writing-an-exploit.html).
