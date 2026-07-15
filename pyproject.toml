@@ -6,7 +6,15 @@ build-backend = "setuptools.build_meta"
 name = "zero-forge"
 version = "0.1.0"
 description = "LLM-based exploit-development harness for security artifact generation"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "langgraph>=1.0",
     "pydantic>=2.0",
