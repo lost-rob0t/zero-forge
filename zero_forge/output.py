@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import secrets
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +21,9 @@ _RESERVED_META_KEYS = frozenset({"artifact_type", "filename", "saved_at"})
 
 class ArtifactPathError(Exception):
     """Raised when an artifact path is invalid or escapes the output directory."""
+
+
+_EXCLUSIVE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
 
 
 def _validate_cve_id(artifact: Artifact) -> None:
@@ -101,6 +106,62 @@ def _safe_resolve(output_root: Path, filename: str) -> Path:
     return destination
 
 
+def _reserve_destination(path: Path) -> None:
+    """Atomically reserve *path* without following links or replacing files."""
+    try:
+        descriptor = os.open(path, _EXCLUSIVE_FLAGS, 0o600)
+    except FileExistsError as exc:
+        raise ArtifactPathError(
+            f"Artifact output already exists; refusing to overwrite: {path}"
+        ) from exc
+    except OSError as exc:
+        raise ArtifactPathError(f"Could not reserve artifact output {path}: {exc}") from exc
+    os.close(descriptor)
+
+
+def _write_temporary(output_root: Path, content: str) -> Path:
+    """Write and fsync *content* to a secure temporary file in *output_root*."""
+    for _ in range(10):
+        path = output_root / f".zeroforge-{secrets.token_hex(16)}.tmp"
+        try:
+            descriptor = os.open(path, _EXCLUSIVE_FLAGS, 0o600)
+        except FileExistsError:
+            continue
+        except OSError as exc:
+            raise ArtifactPathError(f"Could not create temporary output file: {exc}") from exc
+
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        return path
+    raise ArtifactPathError("Could not allocate a unique temporary output file")
+
+
+def _fsync_directory(path: Path) -> None:
+    """Persist directory entry changes on platforms that support directory fsync."""
+    if not hasattr(os, "O_DIRECTORY"):
+        return
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _remove_paths(paths: list[Path]) -> None:
+    """Best-effort cleanup for transaction-owned paths."""
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def save_artifact(artifact: Artifact, output_dir: Path | str | None = None) -> str:
     """Save an artifact to the filesystem.
 
@@ -124,8 +185,6 @@ def save_artifact(artifact: Artifact, output_dir: Path | str | None = None) -> s
     filename = artifact.filename or f"artifact_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     filepath = _safe_resolve(out_path, filename)
 
-    filepath.write_text(artifact.content, encoding="utf-8")
-
     # Metadata sidecar: derive name from validated filepath and apply same protection
     meta_name = filepath.name + ".meta.json"
     meta_path = _safe_resolve(out_path, meta_name)
@@ -140,6 +199,37 @@ def save_artifact(artifact: Artifact, output_dir: Path | str | None = None) -> s
         "saved_at": datetime.now().isoformat(),
         **user_meta,
     }
-    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    metadata_content = json.dumps(meta, indent=2)
+
+    reserved: list[Path] = []
+    temporary: list[Path] = []
+    published: list[Path] = []
+    try:
+        for destination in (filepath, meta_path):
+            _reserve_destination(destination)
+            reserved.append(destination)
+
+        artifact_temp = _write_temporary(filepath.parent, artifact.content)
+        temporary.append(artifact_temp)
+        metadata_temp = _write_temporary(filepath.parent, metadata_content)
+        temporary.append(metadata_temp)
+
+        # Publish metadata first. The artifact becomes visible only after its
+        # matching sidecar is already in place.
+        os.replace(metadata_temp, meta_path)
+        temporary.remove(metadata_temp)
+        reserved.remove(meta_path)
+        published.append(meta_path)
+
+        os.replace(artifact_temp, filepath)
+        temporary.remove(artifact_temp)
+        reserved.remove(filepath)
+        published.append(filepath)
+        _fsync_directory(filepath.parent)
+    except Exception as exc:
+        _remove_paths(temporary + published + reserved)
+        if isinstance(exc, ArtifactPathError):
+            raise
+        raise ArtifactPathError(f"Atomic artifact publication failed: {exc}") from exc
 
     return str(filepath.resolve())
