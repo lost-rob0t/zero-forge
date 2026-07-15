@@ -359,7 +359,7 @@ def test_timeout_is_typed_as_retryable(monkeypatch):
     assert caught.value.provider == "openai"
     assert caught.value.retryable is True
     assert caught.value.attempt == 1
-    assert caught.value.max_attempts == 1
+    assert caught.value.max_attempts == 3
 
 
 def test_malformed_response_fails_closed(monkeypatch):
