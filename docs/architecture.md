@@ -34,6 +34,17 @@ boundary error is appended as a corrective user message. Arguments are validated
 the registered function can execute. Configuration failures, provider failures, and
 errors raised by the registered tool are not selection repairs and fail immediately.
 
+## Workflow-owned argument integrity
+
+A strict `ToolRequest` may declare `locked_arguments`. The workflow includes those
+values in the Tool-model prompt, then rejects a selected call when a locked value is
+missing or changed. Built-in workflow calls lock every argument they supply, including
+source paths and safety policy, CVE and patch inputs, and artifact-validation content.
+
+A rejected substitution enters the existing bounded Tool-selection repair loop and is
+never executed. Requests without locked arguments remain model-constructible for callers
+that intentionally delegate argument construction to the Tool Agent.
+
 ## Fail-closed workflow
 
 - Provider and response failures carry role, provider, model, retryability, and attempt
@@ -41,6 +52,8 @@ errors raised by the registered tool are not selection repairs and fail immediat
 - Stub mode is explicit plumbing only. Stub artifacts cannot validate, save, or complete.
 - Artifact validation is mandatory before persistence, and every Smart repair is
   revalidated.
+- Metasploit validation preflights the Ruby runtime before generation; an unavailable
+  validator runtime fails at startup instead of consuming artifact-repair attempts.
 - Output paths reject unsafe CVE IDs, traversal, escaping destinations, and symlinks.
 - Source collection skips secrets, symlinks, binaries, and gitignored paths unless the
   operator explicitly enables unsafe collection.
@@ -49,6 +62,7 @@ errors raised by the registered tool are not selection repairs and fail immediat
 
 ```text
 VulnerabilityInput
+  -> validator-runtime preflight
   -> Tool Agent context calls
   -> Smart Agent generation
   -> Tool Agent validator call
