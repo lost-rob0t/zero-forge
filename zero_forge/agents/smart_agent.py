@@ -209,8 +209,10 @@ def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> st
                 f"3. Outline the artifact structure (metadata, options, demonstration method).\n"
                 f"4. Implement the complete {profile.label}.\n"
                 f"5. Add non-destructive verification where the evidence supports it.\n\n"
-                f"Follow the artifact contract exactly. Output only a single "
-                f"```{profile.language} code block."
+                f"Follow the artifact contract exactly. Output ONLY a single "
+                f"```{profile.language} code block containing complete, self-contained "
+                f"{profile.label} code. Do not include any explanatory text, prose, "
+                f"comments about what changed, or text outside the code block."
             ),
         ]
     )

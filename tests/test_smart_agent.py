@@ -152,6 +152,17 @@ def test_build_context_prompt_has_multi_step_chain():
     assert "defensive proof-of-concept" in prompt.lower()
 
 
+def test_build_context_prompt_includes_only_code_reminder():
+    """Generation prompt must remind the model to output ONLY code, no prose (issue #72)."""
+    from zero_forge.agents.smart_agent import _build_context_prompt
+
+    ctx = CollectedContext(cve_id="CVE-2021-44228", cve_description="Log4Shell")
+    prompt = _build_context_prompt(VulnerabilityInput(cve_id="CVE-2021-44228"), ctx)
+    assert "ONLY a single" in prompt
+    assert "explanatory text" in prompt.lower()
+    assert "text outside the code block" in prompt.lower()
+
+
 def test_build_repair_prompt_uses_reframed_language():
     """Repair prompt must use reframed terminology, not bare 'fix the exploit' (issue #74)."""
     from zero_forge.agents.smart_agent import _build_repair_prompt
