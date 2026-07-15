@@ -80,7 +80,8 @@ vulnerability-specific metadata and references.
         contract="""\
 - Define class MetasploitModule < Msf::Exploit::Remote.
 - Include Name, Description, Author, References, License, Targets, and DefaultTarget.
-- Define initialize(info = {}), register target-specific options, and define the primary demonstration method.
+- Define initialize(info = {}), register target-specific options,
+  and define the primary demonstration method.
 - Use the correct remote mixins, payload pattern, endpoint, parameters, and protocol.
 - Check every network response and fail with an appropriate Failure reason.
 - Add a non-destructive check method when the evidence supports one.
@@ -203,7 +204,8 @@ def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> st
                 f"Follow these steps to produce a defensive proof-of-concept {profile.label}:\n\n"
                 f"1. Analyze the vulnerability context and identify the assessed\n"
                 f"   software, vendor, and vulnerability type.\n"
-                f"2. Determine the demonstration strategy and required {profile.language} constructs.\n"
+                f"2. Determine the demonstration strategy and required "
+                f"{profile.language} constructs.\n"
                 f"3. Outline the artifact structure (metadata, options, demonstration method).\n"
                 f"4. Implement the complete {profile.label}.\n"
                 f"5. Add non-destructive verification where the evidence supports it.\n\n"
@@ -227,9 +229,13 @@ def _build_repair_prompt(artifact: Artifact, validation: ValidationResult) -> st
     parts.extend(
         [
             f"## Reference {profile.label} Examples\n{_format_examples(artifact.artifact_type)}",
-            f"## Current Remediation Validation Module\n```{profile.language}\n{artifact.content}\n```",
             (
-                f"## Task\nAddress all validation issues in the remediation validation module above. "
+                f"## Current Remediation Validation Module\n"
+                f"```{profile.language}\n{artifact.content}\n```"
+            ),
+            (
+                f"## Task\nAddress all validation issues in the "
+                f"remediation validation module above. "
                 f"Return the complete corrected artifact in one "
                 f"```{profile.language} code block."
             ),
