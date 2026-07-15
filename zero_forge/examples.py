@@ -32,8 +32,8 @@ class ArtifactExample:
 
 
 def default_examples_root() -> Path:
-    """Return the repository-level example directory."""
-    return Path(__file__).resolve().parents[1] / "llm_examples"
+    """Return the package-local example directory."""
+    return Path(__file__).resolve().parent / "llm_examples"
 
 
 def load_artifact_examples(
