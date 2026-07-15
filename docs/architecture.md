@@ -34,10 +34,6 @@ boundary error is appended as a corrective user message. Arguments are validated
 the registered function can execute. Configuration failures, provider failures, and
 errors raised by the registered tool are not selection repairs and fail immediately.
 
-Workflow-owned argument values are declared as locked in the `ToolRequest`. The Tool
-model may construct unlocked arguments, but every locked value must be returned unchanged;
-a missing or changed locked value is repaired or fails before registered-tool execution.
-
 ## Fail-closed workflow
 
 - Provider and response failures carry role, provider, model, retryability, and attempt
