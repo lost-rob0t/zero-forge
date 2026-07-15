@@ -10,7 +10,11 @@ from langgraph.graph.state import CompiledStateGraph
 from .agents.smart_agent import LLMCallError, generate_artifact, repair_artifact
 from .agents.tool_agent import ToolAgent, ToolAgentError
 from .schemas import ArtifactType, WorkflowError, WorkflowState
-from .tools.validator import ValidatorRuntimeUnavailable, require_ruby_runtime
+from .tools.validator import (
+    ValidatorRuntimeUnavailable,
+    require_node_runtime,
+    require_ruby_runtime,
+)
 
 
 def collect_context_node(state: WorkflowState) -> dict[str, Any]:
@@ -250,21 +254,23 @@ def run_workflow(vuln_input) -> WorkflowState:
         vuln_input=vuln_input,
         max_repair_attempts=get_settings().workflow.max_repair_attempts,
     )
-    if vuln_input.artifact_type == ArtifactType.METASPLOIT:
-        try:
+    try:
+        if vuln_input.artifact_type == ArtifactType.METASPLOIT:
             require_ruby_runtime()
-        except ValidatorRuntimeUnavailable as exc:
-            message = str(exc)
-            return initial_state.model_copy(
-                update={
-                    "error": message,
-                    "failure": WorkflowError(
-                        code="validator_runtime_unavailable",
-                        message=message,
-                    ),
-                    "status": "failed",
-                }
-            )
+        else:
+            require_node_runtime()
+    except ValidatorRuntimeUnavailable as exc:
+        message = str(exc)
+        return initial_state.model_copy(
+            update={
+                "error": message,
+                "failure": WorkflowError(
+                    code="validator_runtime_unavailable",
+                    message=message,
+                ),
+                "status": "failed",
+            }
+        )
     app = build_workflow()
     result = app.invoke(initial_state)
     if isinstance(result, WorkflowState):
