@@ -9,7 +9,12 @@ from unittest.mock import patch
 
 import pytest
 
-from zero_forge.tools.validator import DefaultRubyRunner, validate_metasploit
+from zero_forge.tools.validator import (
+    DefaultRubyRunner,
+    ValidatorRuntimeUnavailable,
+    require_ruby_runtime,
+    validate_metasploit,
+)
 
 # --------------------------------------------------------------------------- #
 # Fixtures
@@ -297,12 +302,26 @@ def test_empty_content():
 # --------------------------------------------------------------------------- #
 
 
+def test_ruby_preflight_returns_resolved_executable():
+    with patch("zero_forge.tools.validator.shutil.which", return_value="/usr/bin/ruby"):
+        assert require_ruby_runtime() == "/usr/bin/ruby"
+
+
+def test_ruby_preflight_missing_is_actionable():
+    with (
+        patch("zero_forge.tools.validator.shutil.which", return_value=None),
+        pytest.raises(ValidatorRuntimeUnavailable, match="install Ruby 3.3.8"),
+    ):
+        require_ruby_runtime()
+
+
 def test_ruby_unavailable_fails_closed():
     """When the Ruby executable is not found, validation must fail closed."""
     runner = FakeRubyRunner(syntax_exc=FileNotFoundError("ruby not found"))
     result = validate_metasploit(VALID_MODULE, ruby_runner=runner)
     assert result["is_valid"] is False
     assert any("not found" in e for e in result["errors"])
+    assert result["runtime_error"] is True
 
 
 def test_ruby_ast_unavailable_fails_closed():
@@ -311,6 +330,7 @@ def test_ruby_ast_unavailable_fails_closed():
     result = validate_metasploit(VALID_MODULE, ruby_runner=runner)
     assert result["is_valid"] is False
     assert any("not found" in e for e in result["errors"])
+    assert result["runtime_error"] is True
 
 
 # --------------------------------------------------------------------------- #
