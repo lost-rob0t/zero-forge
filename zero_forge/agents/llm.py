@@ -267,8 +267,6 @@ def call_model(
                     inferred, config.inferred_max_token_cap,
                 )
 
-    import litellm
-
     current_max_tokens = max_tokens
     for current_attempt in range(attempt, attempt + max_attempts):
         logger.trace(  # type: ignore[attr-defined]
@@ -279,6 +277,8 @@ def call_model(
         )
 
         try:
+            import litellm
+
             response = litellm.completion(
                 model=resolved.model,
                 api_key=resolved.api_key,
