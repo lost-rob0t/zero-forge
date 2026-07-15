@@ -1,236 +1,194 @@
-# ZeroForge
+<p align="center">
+  <img src=".github/assets/zero-forge-mark.png" width="360" alt="ZeroForge mark">
+</p>
 
-LLM-based exploit-development harness for security artifact generation.
+<h1 align="center">ZERO//FORGE</h1>
 
-## Overview
+<p align="center">
+  <strong>Exploit engineering, constrained.</strong><br>
+  Turn vulnerability evidence into validated security artifacts.
+</p>
 
-ZeroForge takes vulnerability context (CVE, PoC, write-up, source code, patch diff) and generates security artifacts for authorized testing:
+<p align="center">
+  <a href="https://github.com/lost-rob0t/zero-forge/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/lost-rob0t/zero-forge/actions/workflows/ci.yml/badge.svg"></a>
+  <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-111111?logo=python&logoColor=ff1e1e">
+  <img alt="License GPLv3" src="https://img.shields.io/badge/license-GPLv3-111111?logo=gnu&logoColor=ff1e1e">
+  <img alt="Status experimental" src="https://img.shields.io/badge/status-experimental-ff1e1e">
+</p>
 
-- **Metasploit exploit modules**
-- **ZAP active scan detection rules**
-- **ZAP passive scan detection rules**
+---
 
-## Architecture
+ZeroForge is an LLM-driven exploit-development harness for **authorized security research**. Feed it a CVE, proof of concept, source tree, advisory, or patch. It collects evidence, generates an artifact, validates the result, and drives repair attempts before anything is accepted.
 
+> **The forge does not trust the first draft.**
+
+## What comes out
+
+| Artifact | Output | Validation stance |
+|---|---|---|
+| Metasploit exploit | Ruby module | Ruby syntax and structural contract |
+| ZAP active scan rule | JavaScript | Must send a bounded, non-destructive probe and produce evidence-backed alerts |
+| ZAP passive scan rule | JavaScript | Must remain passive; network calls and request mutation are rejected |
+
+## The pipeline
+
+```text
+                    ┌────────────────────────────┐
+                    │ CVE · PoC · source · patch │
+                    └─────────────┬──────────────┘
+                                  │
+                           collect evidence
+                                  │
+                    ┌─────────────▼──────────────┐
+                    │        SMART AGENT         │
+                    │ reason · design · generate │
+                    └─────────────┬──────────────┘
+                                  │ artifact
+                    ┌─────────────▼──────────────┐
+                    │      HARD VALIDATORS       │
+                    │ syntax · contract · policy │
+                    └───────┬─────────────┬──────┘
+                            │ reject      │ accept
+                            ▼             ▼
+                       repair loop    write artifact
 ```
-input CVE + context
-  → Tool Agent collects context (CVE lookup, source inspection, git diff)
-  → Smart Agent loads bounded examples for the requested artifact type
-  → Smart Agent generates the selected artifact with an LLM
-  → Tool Agent validates the artifact
-  → Smart Agent repairs errors (loop, max 3 attempts)
-  → Save result to filesystem
-```
 
-- **Smart Agent** (`agents/smart_agent.py`): uses the independently configured Smart model for analysis, artifact writing, repair, and review.
-- **Tool Agent** (`agents/tool_agent.py`): uses the independently configured cheap/fast Tool model only to select allowlisted registered tools and construct strict calls. Deterministic Python validates arguments and executes them.
-- **LangGraph** (`workflow.py`): controls the workflow and passes results between both agents.
-- **Tool Registry** (`tools/registry.py`): simple registration and dispatch of named tool functions.
+Two models. Hard role separation.
 
-## Project Structure
+- **Smart Agent** — reads bounded context, reasons about the target, writes the artifact, and repairs validation failures.
+- **Tool Agent** — selects allowlisted tools and constructs strict arguments. It does not write exploit logic.
+- **LangGraph** — owns routing, state, retry budgets, and completion.
+- **Deterministic Python** — validates tool calls and artifacts. Model output is never trusted by default.
 
-```
-zero_forge/
-├── config.py           # Centralized YAML + env var configuration
-├── schemas.py          # Pydantic input/state/artifact schemas
-├── workflow.py         # LangGraph workflow with repair loop
-├── examples.py         # Bounded artifact-specific example loading
-├── output.py           # Filesystem output
-├── cli.py              # Typer CLI
-├── agents/
-│   ├── smart_agent.py  # LLM-powered artifact generation + repair
-│   └── tool_agent.py    # Context collection + validation
-└── tools/
-    ├── registry.py      # Tool registry
-    ├── cve_lookup.py    # NVD API CVE lookup
-    ├── source_inspect.py # Source reading, code search, git diff
-    └── validator.py     # Metasploit and ZAP artifact validation
-zero_forge/llm_examples/
-├── metasploit/         # Complete Ruby module references
-└── zap/
-    ├── active/         # Active detection-rule references
-    └── passive/        # Passive detection-rule references
-```
+## Strike the forge
 
-## Quick Start
+### Requirements
 
-ZeroForge requires Python 3.12 or newer. Metasploit module validation also
-requires Ruby 3.3.8; validation fails closed when Ruby is unavailable.
+- Python **3.12+**
+- [`uv`](https://docs.astral.sh/uv/)
+- Ruby **3.3.8** for Metasploit validation
+- An OpenRouter, OpenAI, or Anthropic API key
 
 ```bash
-# Create the locked development environment
+git clone https://github.com/lost-rob0t/zero-forge.git
+cd zero-forge
 uv sync --locked --extra dev
-
-# Generate an artifact (requires a configured provider key)
-uv run python -m zero_forge.cli generate --cve CVE-2021-44228
-
-# Generate ZAP detection rules
-uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --type zap_active_scan
-uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --type zap_passive_scan
-
-# Generate all supported artifact types for one CVE
-uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --all
-
-# With source code and PoC
-uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --source /path/to/code --poc poc.txt
-
-# With a custom config file
-uv run python -m zero_forge.cli generate --cve CVE-2021-44228 --config my_config.yaml
-
-# List available tools
-uv run python -m zero_forge.cli tools
-
-# Validate an existing module
-uv run python -m zero_forge.cli validate exploit.rb
-
-# Validate ZAP rules
-uv run python -m zero_forge.cli validate active-rule.js --type zap_active_scan
-uv run python -m zero_forge.cli validate passive-rule.js --type zap_passive_scan
-```
-
-`uv sync --locked --extra dev` creates `.venv/` from the committed `uv.lock`
-without changing dependency resolution. Package consumers can still install ZeroForge
-with `pip install .`.
-
-## Configuration
-
-ZeroForge supports centralized configuration via YAML files and environment variables.
-
-### Config File
-
-Copy the example and edit as needed:
-
-```bash
 cp config.example.yaml zeroforge.yaml
 ```
 
-Config search order (first match wins):
-1. `--config <path>` CLI flag (sets `ZERO_FORGE_CONFIG_PATH`)
-2. `ZERO_FORGE_CONFIG_PATH` env var
-3. `./zeroforge.yaml`
-4. `./zeroforge.yml`
-5. `~/.config/zeroforge/config.yaml`
-6. Built-in defaults
-
-### Environment Variables
-
-All settings can be overridden via environment variables (take priority over YAML):
-
-| Variable | Setting | Default |
-|---|---|---|
-| `ZERO_FORGE_SMART_PROVIDER` | `models.smart.provider` | `auto` |
-| `ZERO_FORGE_SMART_MODEL` | `models.smart.model` | `gpt-4o` |
-| `ZERO_FORGE_SMART_TEMPERATURE` | `models.smart.temperature` | `0.3` |
-| `ZERO_FORGE_SMART_MAX_TOKENS` | `models.smart.max_tokens` | `4096` |
-| `ZERO_FORGE_SMART_AUTO_MAX_TOKENS` | `models.smart.auto_max_tokens` | `true` |
-| `ZERO_FORGE_SMART_INFERRED_MAX_TOKEN_CAP` | `models.smart.inferred_max_token_cap` | `8192` |
-| `ZERO_FORGE_SMART_BASE_URL` | `models.smart.base_url` | `""` |
-| `ZERO_FORGE_TOOL_PROVIDER` | `models.tool.provider` | `auto` |
-| `ZERO_FORGE_TOOL_MODEL` | `models.tool.model` | `gpt-4o-mini` |
-| `ZERO_FORGE_TOOL_TEMPERATURE` | `models.tool.temperature` | `0.0` |
-| `ZERO_FORGE_TOOL_MAX_TOKENS` | `models.tool.max_tokens` | `1024` |
-| `ZERO_FORGE_TOOL_AUTO_MAX_TOKENS` | `models.tool.auto_max_tokens` | `true` |
-| `ZERO_FORGE_TOOL_INFERRED_MAX_TOKEN_CAP` | `models.tool.inferred_max_token_cap` | `8192` |
-| `ZERO_FORGE_TOOL_BASE_URL` | `models.tool.base_url` | `""` |
-| `ZERO_FORGE_STUB_MODE` | `llm.stub_mode` | `false` |
-| `ZERO_FORGE_LOG_LEVEL` | `logging.level` | `INFO` |
-| `ZERO_FORGE_LOG_MODEL_IO_LEVEL` | `logging.model_io_level` | `TRACE` |
-| `ZERO_FORGE_OUTPUT_DIR` | `output.dir` | `./output` |
-| `ZERO_FORGE_MAX_REPAIR_ATTEMPTS` | `workflow.max_repair_attempts` | `3` |
-| `OPENROUTER_API_KEY` | `openrouter_api_key` | `""` |
-| `OPENAI_API_KEY` | `openai_api_key` | `""` |
-| `ANTHROPIC_API_KEY` | `anthropic_api_key` | `""` |
-
-> **Security:** API keys are read exclusively from environment variables and are never loaded from YAML files.
-
-### Programmatic Access
-
-```python
-from zero_forge.config import get_settings
-
-settings = get_settings()
-print(settings.models.smart.model)    # gpt-4o
-print(settings.models.tool.model)     # gpt-4o-mini
-print(settings.output.dir)           # ./output
-print(settings.workflow.max_repair_attempts)  # 3
-```
-
-## LLM Mode
-
-ZeroForge supports multiple LLM providers via LiteLLM. Smart and Tool roles have independent provider, model, temperature, token, and base-URL settings. With `provider: auto`, provider priority is **OpenRouter > OpenAI > Anthropic**. Missing credentials, provider errors, malformed Tool calls, disallowed tools, and invalid arguments fail closed with role/provider/model context.
-
-Legacy single-model YAML such as `llm.model` and environment variables such as `ZERO_FORGE_MODEL` are rejected with a migration error. Configure both roles explicitly instead of silently sharing one model.
-
-### Artifact examples and contracts
-
-The Smart Agent injects only examples matching the requested artifact type. Files are
-sorted, loaded whole, and bounded by both count and total character budget; oversized
-files are skipped instead of truncated. Initial generation and every repair attempt
-also receive an explicit structural contract.
-
-The examples in `zero_forge/llm_examples/` are original reference artifacts informed by the
-[ZAP active and passive script templates](https://github.com/zaproxy/community-scripts/tree/main)
-and the
-[Metasploit module development guides](https://docs.metasploit.com/docs/development/developing-modules/guides/get-started-writing-an-exploit.html).
-They use fictional targets where target-specific exploit behavior is needed. Generated
-artifacts must replace those details with evidence from the supplied CVE, PoC, source,
-or patch.
-
-ZAP active rules must clone and mutate a request, send a non-destructive probe, inspect
-the response, and raise an evidence-backed alert. ZAP passive rules fail validation if
-they attempt to send traffic, mutate parameters, or use a network API.
-
-### Auto max_tokens inference
-
-When `auto_max_tokens` is `true` (the default), ZeroForge queries the provider API at call time to infer the model's `max_completion_tokens` and uses `min(inferred, inferred_max_token_cap)` as the effective `max_tokens`. This prevents silent token exhaustion on reasoning models like GLM-5.2 that support 131072 completion tokens but were previously capped at 4096.
-
-- If the provider API is unreachable or returns no data, ZeroForge falls back to the configured `max_tokens` and logs a debug message.
-- Setting `ZERO_FORGE_SMART_MAX_TOKENS` or `ZERO_FORGE_TOOL_MAX_TOKENS` explicitly skips auto-inference for that role.
-- Set `auto_max_tokens: false` to disable inference entirely and always use the static `max_tokens` default.
-- Adjust `inferred_max_token_cap` (default 8192) to raise or lower the cost-control ceiling.
-
-### OpenRouter (preferred)
+Set a provider key:
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-...
+export OPENROUTER_API_KEY='sk-or-...'
+```
+
+Generate a Metasploit module:
+
+```bash
+uv run zero-forge generate --cve CVE-2021-44228
+```
+
+Generate ZAP rules:
+
+```bash
+uv run zero-forge generate --cve CVE-2021-44228 --type zap_active_scan
+uv run zero-forge generate --cve CVE-2021-44228 --type zap_passive_scan
+```
+
+Forge every supported artifact type:
+
+```bash
+uv run zero-forge generate --cve CVE-2021-44228 --all
+```
+
+Bring your own evidence:
+
+```bash
+uv run zero-forge generate \
+  --cve CVE-2021-44228 \
+  --source /path/to/source \
+  --poc ./poc.txt
+```
+
+Validate an existing artifact without generating anything:
+
+```bash
+uv run zero-forge validate exploit.rb
+uv run zero-forge validate active-rule.js --type zap_active_scan
+uv run zero-forge validate passive-rule.js --type zap_passive_scan
+```
+
+## Configuration
+
+Smart and Tool roles are configured independently. Do not point both roles at one model and pretend they are separate agents.
+
+```yaml
+models:
+  smart:
+    provider: openrouter
+    model: anthropic/claude-sonnet-4
+    temperature: 0.3
+
+  tool:
+    provider: openrouter
+    model: openai/gpt-4o-mini
+    temperature: 0.0
+
+workflow:
+  max_repair_attempts: 3
+
+output:
+  dir: ./output
+```
+
+Environment variables override YAML:
+
+```bash
+export ZERO_FORGE_SMART_PROVIDER=openrouter
 export ZERO_FORGE_SMART_MODEL=anthropic/claude-sonnet-4
+export ZERO_FORGE_TOOL_PROVIDER=openrouter
 export ZERO_FORGE_TOOL_MODEL=openai/gpt-4o-mini
-
-# Optional independent OpenRouter-compatible endpoints
-export ZERO_FORGE_SMART_BASE_URL=https://smart.endpoint/v1
-export ZERO_FORGE_TOOL_BASE_URL=https://tool.endpoint/v1
+export ZERO_FORGE_MAX_REPAIR_ATTEMPTS=3
 ```
 
-### OpenAI
+API keys are read from environment variables. They are not loaded from YAML.
 
-```bash
-export OPENAI_API_KEY=sk-...
-export ZERO_FORGE_SMART_PROVIDER=openai
-export ZERO_FORGE_SMART_MODEL=gpt-4o
-export ZERO_FORGE_TOOL_PROVIDER=openai
-export ZERO_FORGE_TOOL_MODEL=gpt-4o-mini
+## Failure is a result
+
+ZeroForge is built to fail closed:
+
+- malformed or disallowed Tool Agent calls are rejected and repaired within budget;
+- artifact examples are selected by type and bounded by count and total size;
+- oversized examples are skipped instead of silently truncated;
+- missing Ruby blocks Metasploit validation;
+- passive ZAP rules fail when they attempt active behavior;
+- stub mode never produces a successful artifact.
+
+## Layout
+
+```text
+zero_forge/
+├── agents/          smart and tool role implementations
+├── tools/           allowlisted research and validation tools
+├── llm_examples/    bounded Metasploit and ZAP references
+├── workflow.py      LangGraph orchestration and repair loop
+├── schemas.py       typed state, input, and artifact contracts
+├── examples.py      artifact-specific example loading
+├── output.py        contained filesystem writes
+└── cli.py           Typer command line interface
 ```
 
-### Anthropic
+## Development
 
 ```bash
-export ANTHROPIC_API_KEY=sk-...
-export ZERO_FORGE_SMART_PROVIDER=anthropic
-export ZERO_FORGE_SMART_MODEL=claude-3.5-sonnet
-export ZERO_FORGE_TOOL_PROVIDER=anthropic
-export ZERO_FORGE_TOOL_MODEL=claude-3-haiku
-```
-
-### Stub mode (explicit testing only)
-
-Set `ZERO_FORGE_STUB_MODE=true` only for local plumbing tests. The generated placeholder is marked as a stub; the workflow terminates as failed and never validates or saves it as a completed exploit.
-
-## Testing
-
-```bash
+uv sync --locked --extra dev
+uv run ruff check .
+uv run mypy zero_forge
 uv run pytest tests/ -v
 ```
 
 ## License
 
-For authorized security testing only.
+ZeroForge is released under the **GNU General Public License v3.0**. See [`LICENSE`](LICENSE).
+
+Use it only on systems you own or are explicitly authorized to test.
