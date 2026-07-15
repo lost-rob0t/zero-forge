@@ -1,0 +1,88 @@
+name: Live OpenRouter E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      cve:
+        description: Real CVE identifier to exercise end to end
+        required: true
+        default: CVE-2021-41773
+        type: string
+      artifact_type:
+        description: Artifact family to generate and validate
+        required: true
+        default: metasploit
+        type: choice
+        options:
+          - metasploit
+          - zap_active_scan
+          - zap_passive_scan
+      smart_model:
+        description: OpenRouter model ID for the Smart Agent
+        required: true
+        default: z-ai/glm-5.2
+        type: choice
+        options:
+          - z-ai/glm-5.2
+          - deepseek/deepseek-v4-pro
+      tool_model:
+        description: OpenRouter model ID for the Tool Agent
+        required: true
+        default: deepseek/deepseek-v4-pro
+        type: choice
+        options:
+          - deepseek/deepseek-v4-pro
+          - z-ai/glm-5.2
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-openrouter-e2e
+  cancel-in-progress: false
+
+jobs:
+  live-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3.8"
+
+      - name: Install ZeroForge
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run paid live end-to-end test
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          python -m zero_forge.live_e2e \
+            --cve "${{ inputs.cve }}" \
+            --type "${{ inputs.artifact_type }}" \
+            --smart-model "${{ inputs.smart_model }}" \
+            --tool-model "${{ inputs.tool_model }}" \
+            --smart-max-tokens 8192 \
+            --tool-max-tokens 1024 \
+            --max-repair-attempts 2 \
+            --timeout-seconds 1200 \
+            --output artifacts/live-e2e
+
+      - name: Upload generated artifact and runner logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: live-e2e-${{ inputs.cve }}-${{ inputs.artifact_type }}
+          path: artifacts/live-e2e
+          if-no-files-found: warn
+          retention-days: 14
