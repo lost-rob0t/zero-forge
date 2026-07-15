@@ -168,6 +168,23 @@ class ToolAgent:
             "arguments that match that tool's callable signature."
         )
 
+    @staticmethod
+    def _is_fully_locked(request: ToolRequest, allowed: list[str]) -> bool:
+        """True when one tool is allowed and every argument is locked.
+
+        In that case the model has nothing to decide: the tool name is fixed and
+        every argument value is workflow-owned.  We skip the LLM call entirely
+        and execute deterministically, which prevents model-dependent failures
+        where the tool model alters or truncates locked argument values (issue
+        #70) and eliminates malformed-JSON errors for fully-locked tools (issue
+        #75).
+        """
+        if len(allowed) != 1:
+            return False
+        if not request.arguments:
+            return False
+        return set(request.arguments.keys()) <= set(request.locked_arguments.keys())
+
     def _select_with_repairs(
         self,
         request: ToolRequest,
@@ -177,6 +194,17 @@ class ToolAgent:
         """Select, optionally validate/execute, and repair boundary failures."""
         settings = get_settings()
         allowed = self._validate_request_allowlist(request)
+
+        # Deterministic shortcut: when every argument is locked and only one
+        # tool is allowed, skip the LLM call entirely (issue #70).
+        if self._is_fully_locked(request, allowed):
+            call = ToolCall(name=allowed[0], arguments=request.arguments)
+            self._validate_locked_arguments(call, request)
+            if not execute:
+                self._validated_arguments(call, allowed_tools=allowed)
+                return call
+            return self.execute_tool_call(call, allowed_tools=allowed)
+
         max_attempts = 1 if settings.llm.stub_mode else 1 + settings.workflow.max_repair_attempts
         corrective_messages: list[dict[str, str]] = []
 

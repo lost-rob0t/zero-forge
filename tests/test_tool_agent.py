@@ -291,10 +291,13 @@ def test_tool_agent_repairs_invalid_arguments_before_execution(monkeypatch):
 
 
 def test_tool_agent_repairs_changed_locked_argument_before_execution(monkeypatch):
+    """When some (not all) arguments are locked, the LLM is still called and
+    must preserve locked values.  A non-locked argument (max_files) keeps the
+    shortcut from triggering (issue #70)."""
     responses = iter(
         [
-            '{"name":"reader","arguments":{"source_path":"/repo","unsafe":true}}',
-            '{"name":"reader","arguments":{"source_path":"/repo","unsafe":false}}',
+            '{"name":"reader","arguments":{"source_path":"/repo","unsafe":true,"max_files":10}}',
+            '{"name":"reader","arguments":{"source_path":"/repo","unsafe":false,"max_files":10}}',
         ]
     )
     requests = []
@@ -305,8 +308,8 @@ def test_tool_agent_repairs_changed_locked_argument_before_execution(monkeypatch
         message = SimpleNamespace(content=next(responses))
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
-    def reader(source_path: str, unsafe: bool = False) -> list[dict]:
-        executed_with.append((source_path, unsafe))
+    def reader(source_path: str, unsafe: bool = False, max_files: int = 20) -> list[dict]:
+        executed_with.append((source_path, unsafe, max_files))
         return []
 
     monkeypatch.setitem(sys.modules, "litellm", SimpleNamespace(completion=completion))
@@ -318,20 +321,25 @@ def test_tool_agent_repairs_changed_locked_argument_before_execution(monkeypatch
         ToolRequest(
             objective="Read safe source context",
             allowed_tools=["reader"],
-            arguments={"source_path": "/repo", "unsafe": False},
+            arguments={"source_path": "/repo", "unsafe": False, "max_files": 10},
             locked_arguments={"source_path": "/repo", "unsafe": False},
         )
     )
 
     assert result.error == ""
-    assert executed_with == [("/repo", False)]
+    assert executed_with == [("/repo", False, 10)]
     assert "changed locked argument(s): unsafe" in requests[1][-1]["content"]
 
 
-def test_validation_rejects_model_substituted_content(monkeypatch):
+def test_validation_deterministic_shortcut_skips_llm(monkeypatch):
+    """When all arguments are locked, the LLM is never called and original
+    values are used directly (issue #70)."""
+    call_count = 0
     executed_with = []
 
     def completion(**_kwargs):
+        nonlocal call_count
+        call_count += 1
         message = SimpleNamespace(
             content='{"name":"validate_metasploit","arguments":{"content":"replacement"}}'
         )
@@ -347,10 +355,11 @@ def test_validation_rejects_model_substituted_content(monkeypatch):
     registry = ToolRegistry()
     registry.register("validate_metasploit", validate_metasploit)
 
-    with pytest.raises(ToolSelectionError, match="changed locked argument.*content"):
-        ToolAgent(registry).validate_artifact("original", "metasploit")
+    result = ToolAgent(registry).validate_artifact("original", "metasploit")
 
-    assert executed_with == []
+    assert call_count == 0
+    assert executed_with == ["original"]
+    assert result.is_valid is True
 
 
 def test_tool_agent_repairs_empty_response(monkeypatch):
