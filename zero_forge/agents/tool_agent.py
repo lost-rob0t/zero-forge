@@ -27,6 +27,7 @@ You are ZeroForge's Tool Agent. You only select one allowed registered tool and
 construct its arguments. Never reason about exploit strategy, write or edit an
 artifact, declare success, or add undeclared fields. Return only one JSON object:
 {"name": "registered_tool_name", "arguments": {}}
+Preserve every locked argument exactly as supplied.
 """
 
 
@@ -116,6 +117,7 @@ class ToolAgent:
                 "objective": request.objective,
                 "allowed_tools": allowed,
                 "arguments": request.arguments,
+                "locked_arguments": request.locked_arguments,
             },
             sort_keys=True,
         )
@@ -195,6 +197,7 @@ class ToolAgent:
                         max_attempts=max_attempts,
                     )
                 )
+                self._validate_locked_arguments(call, request)
                 if not execute:
                     self._validated_arguments(call, allowed_tools=allowed)
                     return call
@@ -209,6 +212,18 @@ class ToolAgent:
                 )
 
         raise AssertionError("Tool selection loop exited without a result")
+
+    @staticmethod
+    def _validate_locked_arguments(call: ToolCall, request: ToolRequest) -> None:
+        """Reject model output that changes workflow-owned argument values."""
+        changed = [
+            name
+            for name, value in request.locked_arguments.items()
+            if name not in call.arguments or call.arguments[name] != value
+        ]
+        if changed:
+            names = ", ".join(sorted(changed))
+            raise ToolSelectionError(f"Tool Agent changed locked argument(s): {names}")
 
     def select_tool_call(self, request: ToolRequest) -> ToolCall:
         result = self._select_with_repairs(request, execute=False)
@@ -278,6 +293,7 @@ class ToolAgent:
                 objective=objective,
                 allowed_tools=[name],
                 arguments=arguments,
+                locked_arguments=arguments,
             )
         )
         if result.error:
