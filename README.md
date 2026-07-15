@@ -175,6 +175,14 @@ Set `ZERO_FORGE_STUB_MODE=true` only for local plumbing tests. The generated pla
 pytest tests/ -v
 ```
 
+## Project Documentation
+
+- [Architecture](docs/architecture.md)
+- [Maintainer operations](docs/maintenance.md)
+- [Wiki home](wiki/Home.md)
+- [Org issue tracker and run ledger](wiki/issues.org)
+- [Research index](research/README.md)
+
 ## License
 
 For authorized security testing only.
