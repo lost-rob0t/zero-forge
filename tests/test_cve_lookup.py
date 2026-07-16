@@ -3,6 +3,8 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from zero_forge.tools.cve_lookup import cve_lookup
 
 
@@ -16,6 +18,13 @@ def test_cve_lookup_formats_id():
 
         result = cve_lookup("2021-44228")
         assert result["cve_id"] == "CVE-2021-44228"
+
+
+def test_cve_lookup_rejects_malformed_id_before_network():
+    with patch("zero_forge.tools.cve_lookup.urllib.request.urlopen") as mock_urlopen:
+        with pytest.raises(ValueError, match="CVE ID must match"):
+            cve_lookup("not-a-cve")
+    mock_urlopen.assert_not_called()
 
 
 def test_cve_lookup_network_failure():

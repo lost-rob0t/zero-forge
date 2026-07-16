@@ -8,20 +8,12 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from ..schemas import CveLookupResult, CveLookupStatus
+from ..schemas import CveLookupResult, CveLookupStatus, normalize_cve_id
 
 NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId={cve_id}"
 
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_BASE = 1.0  # seconds
-
-
-def _normalize_cve_id(cve_id: str) -> str:
-    """Normalize a CVE ID to canonical uppercase format."""
-    cve_id = cve_id.strip().upper()
-    if not cve_id.startswith("CVE-"):
-        cve_id = f"CVE-{cve_id}"
-    return cve_id
 
 
 def _parse_nvd_response(data: dict[str, Any], cve_id: str) -> CveLookupResult:
@@ -138,7 +130,7 @@ def cve_lookup(cve_id: str, timeout: int = 15) -> dict[str, Any]:
     Retryable failures (network errors, rate limits, server errors) are
     retried up to _MAX_RETRIES times with exponential backoff.
     """
-    cve_id = _normalize_cve_id(cve_id)
+    cve_id = normalize_cve_id(cve_id)
 
     for attempt in range(1, _MAX_RETRIES + 1):
         result = _attempt_lookup(cve_id, timeout)

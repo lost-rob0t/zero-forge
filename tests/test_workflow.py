@@ -76,6 +76,26 @@ def test_explicit_stub_never_completes_or_saves(tmp_path, monkeypatch):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_normalized_cve_propagates_to_context_and_artifact(tmp_path, monkeypatch):
+    monkeypatch.setattr("zero_forge.workflow.require_ruby_runtime", lambda: "ruby")
+    _disable_provider_keys(monkeypatch)
+    monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
+    monkeypatch.setenv("ZERO_FORGE_OUTPUT_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "zero_forge.workflow.ToolAgent.collect_context",
+        lambda _self, vuln_input: CollectedContext(cve_id=vuln_input.cve_id),
+    )
+
+    result = run_workflow(VulnerabilityInput(cve_id=" 2021-44228 "))
+
+    assert result.vuln_input.cve_id == "CVE-2021-44228"
+    assert result.context is not None
+    assert result.context.cve_id == "CVE-2021-44228"
+    assert result.artifact is not None
+    assert result.artifact.metadata["cve_id"] == "CVE-2021-44228"
+    assert result.artifact.filename == "cve_2021_44228_exploit.rb"
+
+
 def test_missing_ruby_fails_before_context_or_generation(monkeypatch):
     message = "Ruby 3.3.8 is required for Metasploit validation but was not found"
 
