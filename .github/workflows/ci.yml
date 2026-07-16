@@ -88,3 +88,29 @@ jobs:
         with:
           name: coverage-report
           path: coverage.xml
+
+  py314-install-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.28"
+
+      - name: Install package with locked dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Verify litellm version is below 1.92
+        run: |
+          uv run python -c "from importlib.metadata import version; v = version('litellm'); assert v < '1.92', f'Expected litellm < 1.92 on Python 3.14, got {v}'"
+          echo "litellm version: $(uv run python -c 'from importlib.metadata import version; print(version("litellm"))')"
+
+      - name: Smoke import
+        run: uv run python -c "import zero_forge; print('zero_forge imported successfully')"
