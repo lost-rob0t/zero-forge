@@ -184,8 +184,19 @@ def save_artifact_node(state: WorkflowState) -> dict[str, Any]:
         return {"error": "No artifact to save", "status": "failed"}
     if state.artifact.metadata.get("stub"):
         return {"error": "Refusing to save a stub artifact as completed", "status": "failed"}
-    from .output import save_artifact
-    output_path = save_artifact(state.artifact)
+    from .output import ArtifactPathError, save_artifact
+    try:
+        output_path = save_artifact(state.artifact)
+    except ArtifactPathError as exc:
+        message = str(exc)
+        return {
+            "error": message,
+            "failure": WorkflowError(
+                code="artifact_path_error",
+                message=message,
+            ),
+            "status": "failed",
+        }
     logger.info("Artifact saved to %s", output_path)
     return {"output_path": output_path, "status": "completed"}
 
