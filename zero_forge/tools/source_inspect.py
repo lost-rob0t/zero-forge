@@ -164,6 +164,55 @@ _MAX_READ_BYTES = 1_048_576  # 1 MiB total across all files
 _TRAVERSAL_TIMEOUT = 10.0   # seconds for directory walk
 _READ_TIMEOUT = 10.0        # seconds for content reads
 
+def _collect_source_paths(base: Path) -> tuple[list[Path], bool]:
+    """Collect directory entries without materializing an unbounded directory.
+
+    Every entry inspected consumes the traversal budget, including directories
+    and entries that are later skipped. Directory iterators are consumed only
+    while both the candidate and time budgets remain.
+    """
+    files: list[Path] = []
+    pending = [base]
+    inspected = 0
+    deadline = time.monotonic() + _TRAVERSAL_TIMEOUT
+
+    while pending:
+        directory = pending.pop()
+        subdirectories: list[Path] = []
+        try:
+            with os.scandir(directory) as entries:
+                iterator = iter(entries)
+                while True:
+                    if inspected >= _MAX_TRAVERSAL_CANDIDATES:
+                        return files, True
+                    if time.monotonic() >= deadline:
+                        return files, True
+                    try:
+                        entry = next(iterator)
+                    except StopIteration:
+                        break
+                    inspected += 1
+                    path = Path(entry.path)
+                    try:
+                        if entry.is_symlink():
+                            files.append(path)
+                        elif entry.is_dir(follow_symlinks=False):
+                            if entry.name not in _SKIP_DIRS:
+                                subdirectories.append(path)
+                        elif entry.is_file(follow_symlinks=False):
+                            files.append(path)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+
+        # At most the bounded number of inspected entries can reach this sort.
+        # Reverse order keeps the stack's depth-first traversal deterministic.
+        pending.extend(sorted(subdirectories, reverse=True))
+
+    return files, False
+
+
 def read_source_files(
     source_path: str,
     max_files: int = 20,
@@ -209,21 +258,11 @@ def read_source_files(
     if not base.exists():
         return []
 
+    traversal_truncated = False
     if base.is_file():
         all_files: list[Path] = [base]
     else:
-        all_files = []
-        walk_start = time.monotonic()
-        for root, dirs, filenames in os.walk(base):
-            dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
-            for fname in sorted(filenames):
-                all_files.append(Path(root) / fname)
-                if len(all_files) >= _MAX_TRAVERSAL_CANDIDATES:
-                    break
-            if len(all_files) >= _MAX_TRAVERSAL_CANDIDATES:
-                break
-            if time.monotonic() - walk_start > _TRAVERSAL_TIMEOUT:
-                break
+        all_files, traversal_truncated = _collect_source_paths(base)
 
     results: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -321,7 +360,7 @@ def read_source_files(
     # bounded by total bytes and time.
     total_bytes = 0
     read_start = time.monotonic()
-    truncated = False
+    truncated = traversal_truncated
 
     for cand in candidates:
         if len(results) >= max_files:
@@ -553,3 +592,4 @@ def git_diff_inspect(diff_text: str = "", repo_path: str = "") -> dict[str, Any]
     result["deletions"] = dele
     result["diff_summary"] = f"{len(files)} file(s) changed, {add} insertion(s), {dele} deletion(s)"
     return result
+
