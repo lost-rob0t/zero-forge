@@ -268,6 +268,25 @@ def test_existing_successful_workflow_still_works(tmp_path, monkeypatch):
     assert Path(result["output_path"]).exists()
 
 
+def test_existing_output_collision_becomes_structured_failure(tmp_path):
+    first = _run_workflow_with_mocks(
+        artifact_content=_VALID_CONTENT,
+        validation_errors=None,
+        tmp_path=tmp_path,
+    )
+    second = _run_workflow_with_mocks(
+        artifact_content=_VALID_CONTENT,
+        validation_errors=None,
+        tmp_path=tmp_path,
+    )
+
+    assert first["status"] == "completed"
+    assert second["status"] == "failed"
+    assert second.get("output_path") is None
+    assert second["failure"].code == "artifact_path_error"
+    assert "refusing to overwrite" in second["error"]
+
+
 # --------------------------------------------------------------------------- #
 # 8. should_repair_after_fix always validates (never saves directly)
 # --------------------------------------------------------------------------- #
