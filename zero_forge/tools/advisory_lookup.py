@@ -79,7 +79,8 @@ def _osv_record(vulnerability: dict[str, Any]) -> dict[str, Any]:
     for affected in vulnerability.get("affected", [])[:20]:
         if not isinstance(affected, dict):
             continue
-        package = affected.get("package") if isinstance(affected.get("package"), dict) else {}
+        package_value = affected.get("package")
+        package: dict[str, Any] = package_value if isinstance(package_value, dict) else {}
         affected_packages.append(
             {
                 "ecosystem": str(package.get("ecosystem", "")),
@@ -170,11 +171,8 @@ def _github_record(advisory: dict[str, Any]) -> dict[str, Any]:
     for vulnerability in vulnerabilities[:50]:
         if not isinstance(vulnerability, dict):
             continue
-        package = (
-            vulnerability.get("package")
-            if isinstance(vulnerability.get("package"), dict)
-            else {}
-        )
+        package_value = vulnerability.get("package")
+        package: dict[str, Any] = package_value if isinstance(package_value, dict) else {}
         affected_packages.append(
             {
                 "ecosystem": str(package.get("ecosystem", "")),
