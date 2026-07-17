@@ -43,15 +43,15 @@ def _load_markdown_converter() -> Callable[..., str]:
     return markdownify
 
 
-def _load_playwright() -> tuple[Callable[..., Any], type[Exception], type[Exception]]:
+def _load_playwright() -> Callable[..., Any]:
     try:
-        from playwright.sync_api import Error, TimeoutError, sync_playwright
+        from playwright.sync_api import sync_playwright
     except ImportError as exc:
         raise RenderedWebDependencyError(
             "rendered web research requires Playwright; install requirements-browser.txt "
             "and run 'playwright install chromium'"
         ) from exc
-    return sync_playwright, Error, TimeoutError
+    return sync_playwright
 
 
 def _browser_request_allowed(url: str, resource_type: str) -> bool:
@@ -137,7 +137,7 @@ def _render_public_page(
     max_transfer_bytes: int,
     timeout: int,
 ) -> dict[str, Any]:
-    sync_playwright, playwright_error, playwright_timeout = _load_playwright()
+    sync_playwright = _load_playwright()
     request_count = 0
     transfer_bytes = 0
     request_limited = False
@@ -211,7 +211,7 @@ def _render_public_page(
                         "networkidle",
                         timeout=min(timeout * 1000, 5_000),
                     )
-                except playwright_timeout:
+                except Exception:
                     pass
 
                 stable_rounds = 0
@@ -280,7 +280,7 @@ def _render_public_page(
         raise
     except RenderedWebError:
         raise
-    except playwright_error as exc:
+    except Exception as exc:
         raise RenderedWebError(f"browser rendering failed: {exc}") from exc
 
     return {
