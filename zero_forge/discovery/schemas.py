@@ -54,21 +54,48 @@ class CandidateStatus(StrEnum):
 
 
 class VariantAnalysisRequest(StrictModel):
-    """Authorized, seeded request for source-assisted variant analysis."""
+    """Authorized request for source-assisted, seeded variant analysis."""
 
     source_path: str = Field(min_length=1)
     authorized: bool = False
     seed_summary: str = ""
     seed_diff: str = ""
     seed_terms: list[str] = Field(default_factory=list)
+    seed_cve_ids: list[str] = Field(default_factory=list)
+    seed_ghsa_ids: list[str] = Field(default_factory=list)
+    seed_package_name: str = ""
+    seed_package_ecosystem: str = ""
+    seed_package_version: str = ""
+    collect_known_bugs: bool = True
+    max_known_bugs: int = Field(default=10, ge=1, le=50)
+    web_timeout: int = Field(default=15, ge=1, le=60)
     max_hypotheses: int = Field(default=3, ge=1, le=10)
     max_searches: int = Field(default=8, ge=1, le=50)
     unsafe_source: bool = False
 
     @model_validator(mode="after")
     def require_seed(self) -> VariantAnalysisRequest:
-        if not self.seed_summary.strip() and not self.seed_diff.strip():
-            raise ValueError("seed_summary or seed_diff is required")
+        package_fields = (
+            self.seed_package_name.strip(),
+            self.seed_package_ecosystem.strip(),
+        )
+        if any(package_fields) and not all(package_fields):
+            raise ValueError(
+                "seed_package_name and seed_package_ecosystem must be supplied together"
+            )
+        has_seed = any(
+            (
+                self.seed_summary.strip(),
+                self.seed_diff.strip(),
+                self.seed_cve_ids,
+                self.seed_ghsa_ids,
+                all(package_fields),
+            )
+        )
+        if not has_seed:
+            raise ValueError(
+                "seed_summary, seed_diff, advisory IDs, or a package seed is required"
+            )
         return self
 
 
@@ -80,6 +107,26 @@ class SourceSnapshot(StrictModel):
     language: str = "unknown"
     category: str = "code"
     content: str = ""
+
+
+class KnownBugRecord(FrozenStrictModel):
+    """Normalized advisory context fetched from an official public source."""
+
+    source: str = Field(min_length=1)
+    advisory_id: str = Field(min_length=1)
+    aliases: list[str] = Field(default_factory=list)
+    summary: str = ""
+    details: str = ""
+    severity: str = ""
+    cwes: list[str] = Field(default_factory=list)
+    affected_packages: list[dict[str, Any]] = Field(default_factory=list)
+    vulnerable_functions: list[str] = Field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
+    published: str = ""
+    modified: str = ""
+    source_url: str = ""
+    exploited_in_wild: bool | None = None
+    kev_details: dict[str, Any] = Field(default_factory=dict)
 
 
 class ThreatModel(StrictModel):
@@ -187,6 +234,8 @@ class DiscoveryState(StrictModel):
     phase: DiscoveryPhase = DiscoveryPhase.SCOPE
     source_files: list[SourceSnapshot] = Field(default_factory=list)
     diff_summary: str = ""
+    known_bugs: list[KnownBugRecord] = Field(default_factory=list)
+    research_errors: list[str] = Field(default_factory=list)
     threat_model: ThreatModel | None = None
     hypotheses: list[SecurityHypothesis] = Field(default_factory=list)
     evidence: list[StaticEvidence] = Field(default_factory=list)
