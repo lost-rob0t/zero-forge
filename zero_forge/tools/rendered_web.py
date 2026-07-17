@@ -253,10 +253,15 @@ def fetch_rendered_web_page(
     chunk_chars: int = 12_000,
     max_scrolls: int = 20,
     scroll_wait_ms: int = 300,
+    max_requests: int | None = None,
+    max_transfer_bytes: int | None = None,
+    max_redirects: int | None = None,
+    max_js_heap_mb: int | None = None,
     timeout: int = 30,
 ) -> dict[str, Any]:
     """Render one page, scroll boundedly, and return Markdown chunks."""
 
+    del max_requests, max_transfer_bytes, max_redirects, max_js_heap_mb
     if not url.strip():
         raise ValueError("url must not be empty")
     if not 1_000 <= max_markdown_chars <= 1_000_000:
