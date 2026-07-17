@@ -36,6 +36,14 @@ def test_default_registry():
     reg = create_default_registry()
     names = reg.names()
     assert "cve_lookup" in names
+    assert "osv_query" in names
+    assert "github_advisory_search" in names
+    assert "cisa_kev_lookup" in names
+    assert "web_search" in names
+    assert "fetch_web_page" in names
+    assert "prepare_exploit_workspace" in names
+    assert "write_exploit_draft" in names
+    assert "validate_exploit_draft" in names
     assert "read_source_files" in names
     assert "search_code" in names
     assert "git_diff_inspect" in names
