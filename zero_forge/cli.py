@@ -34,6 +34,23 @@ _ARTIFACT_TYPE_OPTION = cast(
         case_sensitive=False,
     ),
 )
+_WEB_QUERIES_OPTION = cast(
+    list[str],
+    typer.Option(
+        [],
+        "--web-query",
+        help="Repeat for multiple bounded research queries",
+    ),
+)
+_OUTPUT_FORMATS_OPTION = cast(
+    list[str],
+    typer.Option(
+        [],
+        "--format",
+        "-f",
+        help="Repeat to emit markdown, org, or json reports",
+    ),
+)
 
 
 def _build_vuln_input(
@@ -305,17 +322,8 @@ def draft_exploit(
         "-s",
         help="Optional authorized source tree",
     ),
-    web_queries: list[str] = typer.Option(
-        [],
-        "--web-query",
-        help="Repeat for multiple bounded research queries",
-    ),
-    output_formats: list[str] = typer.Option(
-        [],
-        "--format",
-        "-f",
-        help="Repeat to emit markdown, org, or json reports",
-    ),
+    web_queries: list[str] = _WEB_QUERIES_OPTION,
+    output_formats: list[str] = _OUTPUT_FORMATS_OPTION,
     all_formats: bool = typer.Option(
         False,
         "--all-formats",
