@@ -1,2 +1,4 @@
+# Optional dependencies for bounded JS-rendered research pages.
+# Install Chromium separately with: playwright install chromium
 markdownify==1.2.3
 playwright==1.61.0
