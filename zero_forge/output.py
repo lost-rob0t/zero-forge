@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -237,3 +238,14 @@ def save_artifact(artifact: Artifact, output_dir: Path | str | None = None) -> s
         raise ArtifactPathError(f"Atomic artifact publication failed: {exc}") from exc
 
     return str(filepath.resolve())
+
+
+async def save_artifact_async(
+    artifact: Artifact, output_dir: Path | str | None = None
+) -> str:
+    """Save an artifact without blocking the event loop.
+
+    The complete synchronous transaction runs in one worker thread so its
+    validation, atomic publication, and cleanup guarantees remain unchanged.
+    """
+    return await asyncio.to_thread(save_artifact, artifact, output_dir)
