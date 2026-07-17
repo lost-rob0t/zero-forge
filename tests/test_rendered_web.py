@@ -47,10 +47,6 @@ def test_fetch_rendered_page_converts_html_to_markdown_and_chunks():
             "https://vendor.example/advisory",
             max_markdown_chars=10_000,
             chunk_chars=1_000,
-            max_requests=250,
-            max_transfer_bytes=20_000_000,
-            max_redirects=5,
-            max_js_heap_mb=128,
         )
 
     assert result["rendered"] is True
