@@ -39,7 +39,8 @@ errors raised by the registered tool are not selection repairs and fail immediat
 A strict `ToolRequest` may declare `locked_arguments`. The workflow includes those
 values in the Tool-model prompt, then rejects a selected call when a locked value is
 missing or changed. Built-in workflow calls lock every argument they supply, including
-source paths and safety policy, CVE and patch inputs, and artifact-validation content.
+source paths and safety policy, CVE and patch inputs, advisory research filters, and
+artifact-validation content.
 
 A rejected substitution enters the existing bounded Tool-selection repair loop and is
 never executed. Requests without locked arguments remain model-constructible for callers
@@ -70,6 +71,22 @@ VulnerabilityInput
   -> safe output publication or failed terminal state
 ```
 
-The public Python/Context API, typed planning, additional artifact types, discovery
-workflows, and deterministic exploit verification remain roadmap work tracked in GitHub
-issues. They are not implied capabilities of the current release.
+## Discovery subgraph
+
+The first discovery slice is a seeded, specification-first variant-analysis workflow. It
+starts from a historical bug, CVE, GHSA, package coordinate, root-cause description, or
+patch. `COLLECT` admits bounded source, inspects a supplied patch, and can enrich the seed
+through locked OSV, GitHub global-advisory, and CISA KEV tool calls. Network records retain
+provenance and remain context only.
+
+The Smart Agent records an explicit threat model and falsifiable invariants. The Tool Agent
+performs bounded source searches. Static support may create a candidate, but independent
+repeated runtime verification and a passing control case are mandatory before promotion to
+a confirmed finding.
+
+See [`docs/discovery.md`](discovery.md) for the design basis, advisory-source policy,
+promotion gate, and complete implementation backlog.
+
+The public Python/Context API, additional artifact types, runtime discovery adapters,
+durable investigation storage, and deterministic exploit verification remain roadmap work
+tracked in GitHub issues. They are not implied capabilities of the current release.

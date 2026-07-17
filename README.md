@@ -68,6 +68,7 @@ Two models. Hard role separation.
 - [`uv`](https://docs.astral.sh/uv/)
 - Ruby **3.3.8** for Metasploit validation
 - An OpenRouter, OpenAI, or Anthropic API key
+- Optional Brave Search or Tavily API key for public web research
 
 ```bash
 git clone https://github.com/lost-rob0t/zero-forge.git
@@ -86,6 +87,14 @@ ZeroForge automatically loads a `.env` file from the working directory before re
 
 ```bash
 export ZERO_FORGE_ENV_FILE=/path/to/.env
+```
+
+For bounded public web research, configure one search provider. Brave is preferred when both are present:
+
+```bash
+export BRAVE_SEARCH_API_KEY='...'
+# or
+export TAVILY_API_KEY='...'
 ```
 
 Generate a Metasploit module:
@@ -123,6 +132,52 @@ uv run zero-forge validate exploit.rb
 uv run zero-forge validate active-rule.js --type zap_active_scan
 uv run zero-forge validate passive-rule.js --type zap_passive_scan
 ```
+
+## Seeded discovery and iterative drafting
+
+`run_variant_analysis()` derives threat models, falsifiable hypotheses, and static candidates. The `draft` command consumes a candidate and hypothesis, optionally searches the web, iteratively repairs an artifact in `/tmp`, then publishes only a validator-clean investigation.
+
+```bash
+uv run zero-forge draft \
+  --candidate candidate.json \
+  --hypothesis hypothesis.json \
+  --type python \
+  --source /path/to/source \
+  --web-query 'vendor advisory fixing commit' \
+  --format markdown \
+  --format org \
+  --authorized
+```
+
+Output format controls:
+
+- no format flags: Markdown and Org;
+- repeat `--format markdown`, `--format org`, or `--format json` for selected formats;
+- `--all-formats` emits Markdown, Org, and JSON;
+- JSON is opt-in unless `--all-formats` is used.
+
+Completed investigations are moved from `/tmp` into the configured output directory:
+
+```text
+output/<investigation-id>/
+├── findings/
+│   ├── hypothesis.md|org|json
+│   ├── candidate.md|org|json
+│   └── result.md|org|json
+├── evidence/
+│   └── validation/
+│       └── iteration-XX.md|org|json
+├── poc/
+│   ├── <final-artifact>
+│   └── iterations/
+│       └── iteration-XX.<ext>
+└── research/
+    ├── web-results.md|org|json
+    ├── fetched-pages.md|org|json
+    └── errors.md|org|json
+```
+
+Failed or exhausted sessions remain in `/tmp/zeroforge` for inspection. The drafting loop validates artifacts but does not execute them or confirm findings.
 
 ## Configuration
 
@@ -168,8 +223,7 @@ export ZERO_FORGE_TOOL_MODEL=openai/gpt-4o-mini
 export ZERO_FORGE_MAX_REPAIR_ATTEMPTS=3
 ```
 
-API keys are read from environment variables. They are not loaded from YAML.
-A `.env` file in the working directory is loaded before settings resolution; existing shell variables take precedence over `.env` values. Use `ZERO_FORGE_ENV_FILE` to specify a custom `.env` path.
+API keys are read from environment variables. They are not loaded from YAML. A `.env` file in the working directory is loaded before settings resolution; existing shell variables take precedence over `.env` values. Use `ZERO_FORGE_ENV_FILE` to specify a custom `.env` path.
 
 ## Failure is a result
 
@@ -178,6 +232,9 @@ ZeroForge is built to fail closed:
 - malformed or disallowed Tool Agent calls are rejected and repaired within budget;
 - artifact examples are selected by type and bounded by count and total size;
 - oversized examples are skipped instead of silently truncated;
+- web searches and page fetches have provider, query, domain, address, size, count, and timeout bounds;
+- incomplete exploit drafts remain beneath `/tmp/zeroforge` with private permissions;
+- only validator-clean sessions are moved into the configured output tree;
 - missing Ruby blocks Metasploit validation;
 - passive ZAP rules fail when they attempt active behavior;
 - stub mode never produces a successful artifact.
@@ -187,7 +244,8 @@ ZeroForge is built to fail closed:
 ```text
 zero_forge/
 ├── agents/          smart and tool role implementations
-├── tools/           allowlisted research and validation tools
+├── discovery/       seeded analysis and iterative exploit drafting
+├── tools/           allowlisted research, workspace, publishing, and validation tools
 ├── llm_examples/    bounded Metasploit and ZAP references
 ├── workflow.py      LangGraph orchestration and repair loop
 ├── schemas.py       typed state, input, and artifact contracts

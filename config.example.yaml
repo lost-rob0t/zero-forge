@@ -7,6 +7,10 @@
 #   export OPENROUTER_API_KEY="sk-..."
 #   export OPENAI_API_KEY="sk-..."
 #   export ANTHROPIC_API_KEY="sk-..."
+# Optional public web research uses one of these environment-only keys.
+# Brave is preferred when both are set:
+#   export BRAVE_SEARCH_API_KEY="..."
+#   export TAVILY_API_KEY="..."
 
 models:
   smart:
