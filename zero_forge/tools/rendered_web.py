@@ -13,6 +13,16 @@ from .web_research import _USER_AGENT, _bounded_timeout, _validate_public_https_
 
 _BLOCKED_RESOURCE_TYPES = {"image", "media", "font"}
 _LOCAL_RESOURCE_SCHEMES = {"about", "blob", "data"}
+_DISABLE_WEBSOCKETS = """
+Object.defineProperty(window, "WebSocket", {
+    configurable: false,
+    value: class DisabledWebSocket {
+        constructor() {
+            throw new Error("WebSocket disabled by ZeroForge rendered research");
+        }
+    }
+});
+"""
 
 
 class RenderedWebDependencyError(RuntimeError):
@@ -109,6 +119,15 @@ def _chunk_markdown(markdown: str, chunk_chars: int) -> list[str]:
     return [chunk for chunk in chunks if chunk]
 
 
+def _close_safely(resource: Any) -> None:
+    if resource is None:
+        return
+    try:
+        resource.close()
+    except Exception:
+        return
+
+
 def _render_public_page(
     url: str,
     *,
@@ -125,130 +144,138 @@ def _render_public_page(
     transfer_limited = False
     scroll_steps = 0
     scroll_limited = False
+    final_url = url
+    title = ""
+    html = ""
+    fallback_text = ""
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            context = browser.new_context(
-                accept_downloads=False,
-                java_script_enabled=True,
-                service_workers="block",
-                user_agent=_USER_AGENT,
-            )
-            context.set_default_timeout(timeout * 1000)
-            context.set_default_navigation_timeout(timeout * 1000)
-
-            def handle_route(route: Any, request: Any) -> None:
-                nonlocal request_count, request_limited, transfer_limited
-                request_count += 1
-                if request_count > max_requests:
-                    request_limited = True
-                    route.abort("blockedbyclient")
-                    return
-                if transfer_limited or not _browser_request_allowed(
-                    request.url,
-                    request.resource_type,
-                ):
-                    route.abort("blockedbyclient")
-                    return
-                route.continue_()
-
-            def record_response(response: Any) -> None:
-                nonlocal transfer_bytes, transfer_limited
-                raw_length = response.headers.get("content-length", "")
-                try:
-                    transfer_bytes += max(0, int(raw_length))
-                except (TypeError, ValueError):
-                    return
-                if transfer_bytes > max_transfer_bytes:
-                    transfer_limited = True
-
-            context.route("**/*", handle_route)
-            page = context.new_page()
-            page.on("response", record_response)
-            page.on("popup", lambda popup: popup.close())
-            page.on("download", lambda download: download.cancel())
-            page.on("websocket", lambda websocket: websocket.close())
-
-            response = page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=timeout * 1000,
-            )
-            if response is None:
-                raise RenderedWebError("browser navigation returned no response")
-            final_url = page.url
-            _validate_public_https_url(final_url)
-
+            browser: Any = None
+            context: Any = None
             try:
-                page.wait_for_load_state(
-                    "networkidle",
-                    timeout=min(timeout * 1000, 5_000),
+                browser = playwright.chromium.launch(headless=True)
+                context = browser.new_context(
+                    accept_downloads=False,
+                    java_script_enabled=True,
+                    service_workers="block",
+                    user_agent=_USER_AGENT,
                 )
-            except playwright_timeout:
-                pass
+                context.add_init_script(_DISABLE_WEBSOCKETS)
+                context.set_default_timeout(timeout * 1000)
+                context.set_default_navigation_timeout(timeout * 1000)
 
-            stable_rounds = 0
-            previous_height = -1
-            for _ in range(max_scrolls):
-                metrics = page.evaluate(
-                    """() => ({
-                        height: Math.max(
-                            document.body ? document.body.scrollHeight : 0,
-                            document.documentElement.scrollHeight
-                        ),
-                        viewport: window.innerHeight,
-                        y: window.scrollY
-                    })"""
+                def handle_route(route: Any, request: Any) -> None:
+                    nonlocal request_count, request_limited, transfer_limited
+                    request_count += 1
+                    if request_count > max_requests:
+                        request_limited = True
+                        route.abort("blockedbyclient")
+                        return
+                    if transfer_limited or not _browser_request_allowed(
+                        request.url,
+                        request.resource_type,
+                    ):
+                        route.abort("blockedbyclient")
+                        return
+                    route.continue_()
+
+                def record_response(response: Any) -> None:
+                    nonlocal transfer_bytes, transfer_limited
+                    raw_length = response.headers.get("content-length", "")
+                    try:
+                        transfer_bytes += max(0, int(raw_length))
+                    except (TypeError, ValueError):
+                        return
+                    if transfer_bytes > max_transfer_bytes:
+                        transfer_limited = True
+
+                context.route("**/*", handle_route)
+                page = context.new_page()
+                page.on("response", record_response)
+                page.on("popup", lambda popup: popup.close())
+                page.on("download", lambda download: download.cancel())
+
+                response = page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=timeout * 1000,
                 )
-                height = int(metrics.get("height", 0))
-                viewport = int(metrics.get("viewport", 0))
-                y = int(metrics.get("y", 0))
-                at_bottom = y + viewport >= height - 4
-                if height == previous_height and at_bottom:
-                    stable_rounds += 1
-                    if stable_rounds >= 2:
+                if response is None:
+                    raise RenderedWebError("browser navigation returned no response")
+                final_url = page.url
+                _validate_public_https_url(final_url)
+
+                try:
+                    page.wait_for_load_state(
+                        "networkidle",
+                        timeout=min(timeout * 1000, 5_000),
+                    )
+                except playwright_timeout:
+                    pass
+
+                stable_rounds = 0
+                previous_height = -1
+                for _ in range(max_scrolls):
+                    metrics = page.evaluate(
+                        """() => ({
+                            height: Math.max(
+                                document.body ? document.body.scrollHeight : 0,
+                                document.documentElement.scrollHeight
+                            ),
+                            viewport: window.innerHeight,
+                            y: window.scrollY
+                        })"""
+                    )
+                    height = int(metrics.get("height", 0))
+                    viewport = int(metrics.get("viewport", 0))
+                    y = int(metrics.get("y", 0))
+                    at_bottom = y + viewport >= height - 4
+                    if height == previous_height and at_bottom:
+                        stable_rounds += 1
+                        if stable_rounds >= 2:
+                            break
+                    else:
+                        stable_rounds = 0
+                    previous_height = height
+                    if transfer_limited or request_limited:
                         break
+                    page.evaluate(
+                        "() => window.scrollTo(0, document.documentElement.scrollHeight)"
+                    )
+                    page.wait_for_timeout(scroll_wait_ms)
+                    scroll_steps += 1
                 else:
-                    stable_rounds = 0
-                previous_height = height
-                if transfer_limited or request_limited:
-                    break
-                page.evaluate(
-                    "() => window.scrollTo(0, document.documentElement.scrollHeight)"
-                )
-                page.wait_for_timeout(scroll_wait_ms)
-                scroll_steps += 1
-            else:
-                scroll_limited = max_scrolls > 0
+                    scroll_limited = max_scrolls > 0
 
-            extracted = page.evaluate(
-                """() => {
-                    const selectors = ["main", "article", "[role='main']", "body"];
-                    const candidates = selectors
-                        .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
-                        .filter((node) => node && node.innerText && node.innerText.trim());
-                    candidates.sort((left, right) =>
-                        right.innerText.trim().length - left.innerText.trim().length
-                    );
-                    const source = candidates[0] || document.body || document.documentElement;
-                    const clone = source.cloneNode(true);
-                    clone.querySelectorAll(
-                        "script,style,noscript,svg,canvas,template,iframe,object,embed"
-                    ).forEach((node) => node.remove());
-                    clone.querySelectorAll("[hidden],[aria-hidden='true']")
-                        .forEach((node) => node.remove());
-                    return {
-                        html: clone.outerHTML || clone.innerHTML || "",
-                        text: clone.innerText || source.innerText || ""
-                    };
-                }"""
-            )
-            title = page.title()
-            html = str(extracted.get("html", ""))
-            fallback_text = str(extracted.get("text", ""))
-            context.close()
-            browser.close()
+                extracted = page.evaluate(
+                    """() => {
+                        const selectors = ["main", "article", "[role='main']", "body"];
+                        const candidates = selectors
+                            .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
+                            .filter((node) => node && node.innerText && node.innerText.trim());
+                        candidates.sort((left, right) =>
+                            right.innerText.trim().length - left.innerText.trim().length
+                        );
+                        const source = candidates[0] || document.body || document.documentElement;
+                        const clone = source.cloneNode(true);
+                        clone.querySelectorAll(
+                            "script,style,noscript,svg,canvas,template,iframe,object,embed"
+                        ).forEach((node) => node.remove());
+                        clone.querySelectorAll("[hidden],[aria-hidden='true']")
+                            .forEach((node) => node.remove());
+                        return {
+                            html: clone.outerHTML || clone.innerHTML || "",
+                            text: clone.innerText || source.innerText || ""
+                        };
+                    }"""
+                )
+                title = page.title()
+                html = str(extracted.get("html", ""))
+                fallback_text = str(extracted.get("text", ""))
+            finally:
+                _close_safely(context)
+                _close_safely(browser)
     except RenderedWebDependencyError:
         raise
     except RenderedWebError:
