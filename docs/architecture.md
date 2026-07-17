@@ -70,6 +70,17 @@ VulnerabilityInput
   -> safe output publication or failed terminal state
 ```
 
-The public Python/Context API, typed planning, additional artifact types, discovery
-workflows, and deterministic exploit verification remain roadmap work tracked in GitHub
-issues. They are not implied capabilities of the current release.
+## Discovery subgraph
+
+The first discovery slice is a seeded, specification-first variant-analysis workflow. It
+starts from a historical bug, root-cause description, or patch; records an explicit threat
+model and falsifiable invariants; and uses only bounded Tool Agent source searches. Static
+support may create a candidate, but independent repeated runtime verification and a passing
+control case are mandatory before promotion to a confirmed finding.
+
+See [`docs/discovery.md`](discovery.md) for the design basis, promotion gate, and next
+runtime-adapter slice.
+
+The public Python/Context API, additional artifact types, full runtime discovery adapters,
+and deterministic exploit verification remain roadmap work tracked in GitHub issues. They
+are not implied capabilities of the current release.
