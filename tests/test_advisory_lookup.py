@@ -103,6 +103,24 @@ def test_github_advisory_search_normalizes_vulnerable_functions():
     assert records[0]["vulnerable_functions"] == ["parse_record"]
 
 
+def test_github_advisory_search_maps_pypi_to_pip():
+    with patch(
+        "zero_forge.tools.advisory_lookup.urllib.request.urlopen",
+        return_value=_response([]),
+    ) as mock_urlopen:
+        github_advisory_search(
+            cve_ids=[],
+            ghsa_ids=[],
+            package_name="demo-parser",
+            ecosystem="PyPI",
+            version="1.0.0",
+        )
+
+    request = mock_urlopen.call_args.args[0]
+    assert "affects=demo-parser%401.0.0" in request.full_url
+    assert "ecosystem=pip" in request.full_url
+
+
 def test_cisa_kev_lookup_filters_requested_cves():
     payload = {
         "vulnerabilities": [
