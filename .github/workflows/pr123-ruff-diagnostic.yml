@@ -1,0 +1,35 @@
+name: PR 123 Ruff Diagnostic
+
+on:
+  push:
+    branches:
+      - gpt-5-6-thinking/122-rendered-web-markdown-b4e2
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+      - run: uv sync --locked --extra dev
+      - name: Capture Ruff output
+        shell: bash
+        run: |
+          set +e
+          uv run ruff check . --output-format concise > ruff.txt 2>&1
+          echo "ruff_exit=$?" > exit.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr123-ruff-diagnostic
+          path: |
+            ruff.txt
+            exit.txt
+          if-no-files-found: error
