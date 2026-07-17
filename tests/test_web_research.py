@@ -1,5 +1,6 @@
 """Tests for bounded web search and page retrieval tools."""
 
+import hashlib
 import json
 import urllib.error
 from email.message import Message
@@ -125,14 +126,50 @@ def test_fetch_web_page_extracts_text_and_hashes_content():
         patch(
             "zero_forge.tools.web_research.urllib.request.urlopen",
             return_value=response,
-        ),
+        ) as mock_urlopen,
     ):
         result = fetch_web_page("https://vendor.example/advisory")
 
+    request = mock_urlopen.call_args.args[0]
+    assert request.headers["Accept-encoding"] == "identity"
     assert result["title"] == "Vendor Fix"
     assert "Patch available" in result["text"]
     assert "ignore()" not in result["text"]
     assert len(result["sha256"]) == 64
+    assert result["truncated"] is False
+
+
+def test_fetch_web_page_truncates_oversized_response():
+    headers = Message()
+    headers["Content-Type"] = "text/html; charset=utf-8"
+    body = b"<html><body>" + (b"x" * 200) + b"</body></html>"
+    response = MagicMock()
+    response.geturl.return_value = "https://vendor.example/advisory"
+    response.headers = headers
+    response.read.return_value = body
+    response.__enter__ = MagicMock(return_value=response)
+    response.__exit__ = MagicMock(return_value=False)
+    public_address = [(2, 1, 6, "", ("93.184.216.34", 443))]
+
+    with (
+        patch(
+            "zero_forge.tools.web_research.socket.getaddrinfo",
+            return_value=public_address,
+        ),
+        patch(
+            "zero_forge.tools.web_research.urllib.request.urlopen",
+            return_value=response,
+        ),
+    ):
+        result = fetch_web_page(
+            "https://vendor.example/advisory",
+            max_bytes=64,
+        )
+
+    response.read.assert_called_once_with(65)
+    assert result["truncated"] is True
+    assert result["size_bytes"] == 64
+    assert result["sha256"] == hashlib.sha256(body[:64]).hexdigest()
 
 
 def test_fetch_web_page_propagates_bounded_http_failure():
