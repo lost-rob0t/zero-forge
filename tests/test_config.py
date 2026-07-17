@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 import yaml
@@ -240,6 +241,81 @@ def test_default_config_paths_exist():
     assert DEFAULT_CONFIG_PATHS
 
 
+# --- XDG config path tests ------------------------------------------------
+
+
+def test_user_config_paths_respects_xdg_config_home(tmp_path, monkeypatch):
+    """_user_config_paths uses XDG_CONFIG_HOME when set."""
+    from zero_forge.config import _user_config_paths
+
+    xdg_dir = tmp_path / "custom-xdg"
+    xdg_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+
+    paths = _user_config_paths()
+    assert len(paths) == 2
+    assert paths[0] == str(xdg_dir / "zeroforge" / "config.yaml")
+    assert paths[1] == str(xdg_dir / "zeroforge" / "config.yml")
+
+
+def test_user_config_paths_falls_back_to_home(monkeypatch):
+    """_user_config_paths falls back to ~/.config when XDG_CONFIG_HOME unset."""
+    from zero_forge.config import _user_config_paths
+
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    paths = _user_config_paths()
+    expected_dir = Path.home() / ".config" / "zeroforge"
+    assert paths[0] == str(expected_dir / "config.yaml")
+    assert paths[1] == str(expected_dir / "config.yml")
+
+
+def test_user_config_paths_empty_xdg_falls_back(monkeypatch):
+    """Empty XDG_CONFIG_HOME string falls back to ~/.config."""
+    from zero_forge.config import _user_config_paths
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", "")
+
+    paths = _user_config_paths()
+    expected_dir = Path.home() / ".config" / "zeroforge"
+    assert paths[0] == str(expected_dir / "config.yaml")
+
+
+def test_load_config_from_xdg_path(tmp_path, monkeypatch, clean_env):
+    """load_config picks up config.yaml from XDG_CONFIG_HOME."""
+    xdg_dir = tmp_path / "xdg-config"
+    app_dir = xdg_dir / "zeroforge"
+    app_dir.mkdir(parents=True)
+    config_file = app_dir / "config.yaml"
+    config_file.write_text(yaml.dump({"models": {"smart": {"model": "xdg-model"}}}))
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+
+    settings = load_config()
+    assert settings.models.smart.model == "xdg-model"
+
+
+def test_local_config_takes_priority_over_xdg(tmp_path, monkeypatch, clean_env):
+    """./zeroforge.yaml takes priority over XDG config path."""
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+
+    xdg_dir = tmp_path / "xdg-config"
+    app_dir = xdg_dir / "zeroforge"
+    app_dir.mkdir(parents=True)
+    (app_dir / "config.yaml").write_text(yaml.dump({"models": {"smart": {"model": "xdg-model"}}}))
+
+    local_config = work_dir / "zeroforge.yaml"
+    local_config.write_text(yaml.dump({"models": {"smart": {"model": "local-model"}}}))
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(work_dir)
+
+    settings = load_config()
+    assert settings.models.smart.model == "local-model"
+
+
 # --- .env file loading tests (issue #109) --------------------------------
 
 
@@ -256,6 +332,7 @@ def test_load_env_file_populates_os_environ(tmp_path, monkeypatch):
     _load_env_file()
 
     import os
+
     assert os.environ.get("TEST_ENV_VAR") == "hello_from_dotenv"
 
 
@@ -272,6 +349,7 @@ def test_load_env_file_handles_export_prefix(tmp_path, monkeypatch):
     _load_env_file()
 
     import os
+
     assert os.environ.get("TEST_EXPORT_VAR") == "exported_value"
 
 
@@ -288,6 +366,7 @@ def test_load_env_file_does_not_override_existing(tmp_path, monkeypatch):
     _load_env_file()
 
     import os
+
     assert os.environ.get("EXISTING_VAR") == "from_shell"
 
 

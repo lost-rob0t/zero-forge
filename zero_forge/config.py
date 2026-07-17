@@ -207,10 +207,27 @@ def _apply_env_overrides(settings: Settings) -> Settings:
     return Settings(**data)
 
 
+def _user_config_paths() -> list[str]:
+    """Return XDG-aware config file paths under the user config directory.
+
+    Respects XDG_CONFIG_HOME; falls back to ~/.config when unset or empty.
+    """
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "")
+    if xdg_config_home:
+        config_dir = Path(xdg_config_home).expanduser()
+    else:
+        config_dir = Path.home() / ".config"
+    app_dir = config_dir / "zeroforge"
+    return [
+        str(app_dir / "config.yaml"),
+        str(app_dir / "config.yml"),
+    ]
+
+
 DEFAULT_CONFIG_PATHS: list[str] = [
     "./zeroforge.yaml",
     "./zeroforge.yml",
-    "~/.config/zeroforge/config.yaml",
+    *_user_config_paths(),
 ]
 
 
@@ -227,7 +244,8 @@ def load_config(path: str | Path | None = None) -> Settings:
             raise FileNotFoundError(f"Config file not found: {config_path}")
         yaml_data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     else:
-        for candidate in DEFAULT_CONFIG_PATHS:
+        search_paths = ["./zeroforge.yaml", "./zeroforge.yml", *_user_config_paths()]
+        for candidate in search_paths:
             config_path = Path(candidate).expanduser()
             if config_path.exists():
                 yaml_data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
