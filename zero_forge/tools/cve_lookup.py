@@ -131,6 +131,8 @@ def cve_lookup(cve_id: str, timeout: int = 15) -> dict[str, Any]:
     retried up to _MAX_RETRIES times with exponential backoff.
     """
     cve_id = normalize_cve_id(cve_id)
+    if not cve_id:
+        raise ValueError("CVE ID is required for direct lookup")
 
     for attempt in range(1, _MAX_RETRIES + 1):
         result = _attempt_lookup(cve_id, timeout)

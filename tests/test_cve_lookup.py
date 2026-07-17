@@ -27,6 +27,22 @@ def test_cve_lookup_rejects_malformed_id_before_network():
     mock_urlopen.assert_not_called()
 
 
+def test_cve_lookup_rejects_empty_id_before_network():
+    """Empty CVE ID must be rejected before any network access."""
+    with patch("zero_forge.tools.cve_lookup.urllib.request.urlopen") as mock_urlopen:
+        with pytest.raises(ValueError, match="CVE ID is required for direct lookup"):
+            cve_lookup("")
+    mock_urlopen.assert_not_called()
+
+
+def test_cve_lookup_rejects_whitespace_only_id_before_network():
+    """Whitespace-only CVE ID canonicalizes to empty and must be rejected before network access."""
+    with patch("zero_forge.tools.cve_lookup.urllib.request.urlopen") as mock_urlopen:
+        with pytest.raises(ValueError, match="CVE ID is required for direct lookup"):
+            cve_lookup("   ")
+    mock_urlopen.assert_not_called()
+
+
 def test_cve_lookup_network_failure():
     with patch("zero_forge.tools.cve_lookup.urllib.request.urlopen", side_effect=Exception("Network error")):
         result = cve_lookup("CVE-2021-44228")
