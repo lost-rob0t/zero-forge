@@ -57,6 +57,27 @@ def test_vulnerability_input_source_only():
     assert vi.source_path == "/tmp/dvwa"
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("cve-2021-44228", "CVE-2021-44228"),
+        ("2021-44228", "CVE-2021-44228"),
+        ("  CvE-2021-44228  ", "CVE-2021-44228"),
+    ],
+)
+def test_vulnerability_input_normalizes_cve_id(raw, expected):
+    assert VulnerabilityInput(cve_id=raw).cve_id == expected
+
+
+@pytest.mark.parametrize(
+    "cve_id",
+    ["CVE-21-44228", "CVE-2021-123", "CVE-2021-44x28", "not-a-cve"],
+)
+def test_vulnerability_input_rejects_malformed_cve_id(cve_id):
+    with pytest.raises(ValidationError, match="CVE ID must match"):
+        VulnerabilityInput(cve_id=cve_id)
+
+
 def test_artifact_creation():
     art = Artifact(
         artifact_type=ArtifactType.METASPLOIT,

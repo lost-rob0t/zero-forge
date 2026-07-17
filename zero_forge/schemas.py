@@ -2,10 +2,28 @@
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_CVE_ID_PATTERN = re.compile(r"^CVE-[0-9]{4}-[0-9]{4,}$")
+
+
+def normalize_cve_id(value: str) -> str:
+    """Return a canonical CVE ID, preserving an empty source-only value."""
+    if not isinstance(value, str):
+        raise ValueError("CVE ID must be a string")
+
+    normalized = value.strip().upper()
+    if not normalized:
+        return ""
+    if not normalized.startswith("CVE-"):
+        normalized = f"CVE-{normalized}"
+    if not _CVE_ID_PATTERN.fullmatch(normalized):
+        raise ValueError("CVE ID must match CVE-YYYY-NNNN with at least four sequence digits")
+    return normalized
 
 
 class StrictSchema(BaseModel):
@@ -37,6 +55,14 @@ class VulnerabilityInput(BaseModel):
     writeup_text: str = Field(default="", description="Vulnerability write-up or analysis")
     source_path: str | None = Field(default=None, description="Path to vulnerable source code")
     patch_diff: str = Field(default="", description="Patch or git diff as text")
+
+    @field_validator("cve_id", mode="before")
+    @classmethod
+    def validate_cve_id(cls, value: object) -> str:
+        """Normalize and validate CVE IDs at the workflow input boundary."""
+        if not isinstance(value, str):
+            raise ValueError("CVE ID must be a string")
+        return normalize_cve_id(value)
 
 class SourceFile(BaseModel):
     """A single source file inspected by the harness."""
