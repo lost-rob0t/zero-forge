@@ -598,12 +598,10 @@ def test_call_model_async_auto_infers_max_tokens(clean_env, monkeypatch):
         captured.update(kwargs)
         return _FakeResponse("hello")
 
-    mock_resp = mock.MagicMock()
-    mock_resp.read.return_value = b'{"data": [{"id": "z-ai/glm-5.2", "top_provider": {"max_completion_tokens": 131072}}]}'
-    mock_resp.__enter__ = mock.MagicMock(return_value=mock_resp)
-    mock_resp.__exit__ = mock.MagicMock(return_value=False)
+    async def fake_resolve_limits(model, provider, api_key):
+        return 131072
 
-    with mock.patch("zero_forge.agents.llm.urllib.request.urlopen", return_value=mock_resp):
+    with mock.patch("zero_forge.agents.llm.resolve_model_limits_async", side_effect=fake_resolve_limits):
         with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
             result = asyncio.run(call_model_async("smart", config, "sys", "user"))
 
