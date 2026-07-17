@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import typer
 from rich.console import Console
@@ -13,6 +13,9 @@ from .config import ensure_default_config, get_settings
 from .logging_config import setup_logging_from_settings
 from .schemas import ArtifactType, ToolRequest, VulnerabilityInput, WorkflowState
 from .workflow import run_workflow
+
+if TYPE_CHECKING:
+    from .discovery.schemas import SourceSnapshot
 
 app = typer.Typer(
     name="zero-forge",
@@ -151,7 +154,7 @@ def _resolve_output_formats(values: list[str], all_formats: bool) -> list[str]:
     return normalized
 
 
-def _source_snapshots(source_path: str, unsafe: bool):
+def _source_snapshots(source_path: str, unsafe: bool) -> list[SourceSnapshot]:
     if not source_path:
         return []
     from .agents.tool_agent import ToolAgent
@@ -183,7 +186,11 @@ def _source_snapshots(source_path: str, unsafe: bool):
             content=str(item.get("content", "")),
         )
         for item in raw
-        if isinstance(item, dict) and not item.get("skipped") and not item.get("truncated")
+        if (
+            isinstance(item, dict)
+            and not item.get("skipped")
+            and not item.get("truncated")
+        )
     ]
 
 
@@ -197,16 +204,45 @@ def generate(
     ),
     artifact_type: ArtifactType = _ARTIFACT_TYPE_OPTION,
     all_types: bool = typer.Option(
-        False, "--all", help="Generate artifacts for every supported type (overrides --type)"
+        False,
+        "--all",
+        help="Generate artifacts for every supported type (overrides --type)",
     ),
-    poc_file: str = typer.Option("", "--poc", "-p", help="Path to proof-of-concept file"),
-    writeup_file: str = typer.Option("", "--writeup", "-w", help="Path to vulnerability write-up"),
-    source_path: str = typer.Option("", "--source", "-s", help="Path to vulnerable source code"),
-    patch_file: str = typer.Option("", "--patch", "-d", help="Path to patch/diff file"),
+    poc_file: str = typer.Option(
+        "",
+        "--poc",
+        "-p",
+        help="Path to proof-of-concept file",
+    ),
+    writeup_file: str = typer.Option(
+        "",
+        "--writeup",
+        "-w",
+        help="Path to vulnerability write-up",
+    ),
+    source_path: str = typer.Option(
+        "",
+        "--source",
+        "-s",
+        help="Path to vulnerable source code",
+    ),
+    patch_file: str = typer.Option(
+        "",
+        "--patch",
+        "-d",
+        help="Path to patch/diff file",
+    ),
     output_dir: str = typer.Option(
-        "", "--output", "-o", help="Output directory (overrides config)"
+        "",
+        "--output",
+        "-o",
+        help="Output directory (overrides config)",
     ),
-    config_file: str = typer.Option("", "--config", help="Path to YAML config file"),
+    config_file: str = typer.Option(
+        "",
+        "--config",
+        help="Path to YAML config file",
+    ),
     unsafe: bool = typer.Option(
         False,
         "--unsafe",
@@ -247,35 +283,67 @@ def generate(
 
 @app.command("draft")
 def draft_exploit(
-    candidate_file: str = typer.Option(..., "--candidate", help="Path to CandidateFinding JSON"),
+    candidate_file: str = typer.Option(
+        ...,
+        "--candidate",
+        help="Path to CandidateFinding JSON",
+    ),
     hypothesis_file: str = typer.Option(
-        ..., "--hypothesis", help="Path to SecurityHypothesis JSON"
+        ...,
+        "--hypothesis",
+        help="Path to SecurityHypothesis JSON",
     ),
     artifact_type: str = typer.Option(
-        "metasploit", "--type", "-t", help="metasploit, python, zap_active, or zap_passive"
+        "metasploit",
+        "--type",
+        "-t",
+        help="metasploit, python, zap_active, or zap_passive",
     ),
     source_path: str = typer.Option(
-        "", "--source", "-s", help="Optional authorized source tree"
+        "",
+        "--source",
+        "-s",
+        help="Optional authorized source tree",
     ),
     web_queries: list[str] = typer.Option(
-        [], "--web-query", help="Repeat for multiple bounded research queries"
+        [],
+        "--web-query",
+        help="Repeat for multiple bounded research queries",
     ),
     output_formats: list[str] = typer.Option(
-        [], "--format", "-f", help="Repeat to emit markdown, org, or json reports"
+        [],
+        "--format",
+        "-f",
+        help="Repeat to emit markdown, org, or json reports",
     ),
     all_formats: bool = typer.Option(
-        False, "--all-formats", help="Emit Markdown, Org, and JSON reports"
+        False,
+        "--all-formats",
+        help="Emit Markdown, Org, and JSON reports",
     ),
     output_dir: str = typer.Option(
-        "", "--output", "-o", help="Output directory (overrides config)"
+        "",
+        "--output",
+        "-o",
+        help="Output directory (overrides config)",
     ),
     max_iterations: int = typer.Option(
-        4, "--max-iterations", min=1, max=8, help="Maximum Smart Agent repair iterations"
+        4,
+        "--max-iterations",
+        min=1,
+        max=8,
+        help="Maximum Smart Agent repair iterations",
     ),
     authorized: bool = typer.Option(
-        False, "--authorized", help="Confirm that this investigation is explicitly authorized"
+        False,
+        "--authorized",
+        help="Confirm that this investigation is explicitly authorized",
     ),
-    config_file: str = typer.Option("", "--config", help="Path to YAML config file"),
+    config_file: str = typer.Option(
+        "",
+        "--config",
+        help="Path to YAML config file",
+    ),
     unsafe: bool = typer.Option(
         False,
         "--unsafe",
@@ -283,7 +351,14 @@ def draft_exploit(
     ),
 ) -> None:
     """Iteratively draft and validate an exploit artifact, then publish its bundle."""
-    from .discovery.exploit_loop import ExploitIterationRequest, run_exploit_iteration
+    from .discovery.exploit_loop import (
+        ArtifactType as DraftArtifactType,
+    )
+    from .discovery.exploit_loop import (
+        ExploitIterationRequest,
+        OutputFormat,
+        run_exploit_iteration,
+    )
     from .discovery.schemas import CandidateFinding, SecurityHypothesis
 
     if not authorized:
@@ -303,10 +378,10 @@ def draft_exploit(
             hypothesis=hypothesis,
             source_files=_source_snapshots(source_path, unsafe),
             web_queries=web_queries,
-            artifact_type=artifact_type,
+            artifact_type=cast(DraftArtifactType, artifact_type),
             max_iterations=max_iterations,
             output_dir=output_dir,
-            output_formats=formats,
+            output_formats=[cast(OutputFormat, value) for value in formats],
         )
     )
 
@@ -345,7 +420,12 @@ def tools() -> None:
 @app.command()
 def validate(
     file: str = typer.Argument(..., help="Path to artifact file"),
-    artifact_type: str = typer.Option("metasploit", "--type", "-t", help="Artifact type"),
+    artifact_type: str = typer.Option(
+        "metasploit",
+        "--type",
+        "-t",
+        help="Artifact type",
+    ),
 ) -> None:
     """Validate an existing artifact file."""
     from .agents.tool_agent import ToolAgent
