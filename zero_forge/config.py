@@ -231,6 +231,75 @@ DEFAULT_CONFIG_PATHS: list[str] = [
 ]
 
 
+DEFAULT_CONFIG_TEMPLATE = """\
+# ZeroForge configuration
+# Edit this file to customize model, logging, and workflow settings.
+# API keys are environment-only.  A .env file in the working directory is
+# loaded automatically before settings resolution; shell variables take
+# precedence over .env values.  Use ZERO_FORGE_ENV_FILE for a custom path:
+#   export ZERO_FORGE_ENV_FILE=/path/to/.env
+#   export OPENROUTER_API_KEY="sk-..."
+#   export OPENAI_API_KEY="sk-..."
+#   export ANTHROPIC_API_KEY="sk-..."
+
+models:
+  smart:
+    provider: "auto"            # auto, openrouter, openai, or anthropic
+    model: "gpt-4o"             # reasoning and artifact-writing model
+    temperature: 0.3
+    max_tokens: 4096
+    auto_max_tokens: true       # infer max_tokens from provider API
+    inferred_max_token_cap: 8192 # upper bound for inferred max_tokens
+    base_url: ""                # optional LiteLLM-compatible endpoint
+
+  tool:
+    provider: "auto"            # independently resolved provider
+    model: "gpt-4o-mini"        # cheap/fast registered-tool caller
+    temperature: 0.0
+    max_tokens: 1024
+    auto_max_tokens: true       # infer max_tokens from provider API
+    inferred_max_token_cap: 8192 # upper bound for inferred max_tokens
+    base_url: ""                # may differ from the Smart model endpoint
+
+llm:
+  stub_mode: false              # placeholder mode; never completes or saves
+
+logging:
+  level: "INFO"                 # TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL
+  model_io_level: "TRACE"       # minimum level for model I/O (prompts/responses)
+
+workflow:
+  max_repair_attempts: 3
+  unsafe_source_collection: false
+
+output:
+  dir: "./output"
+"""
+
+
+def ensure_default_config() -> Path | None:
+    """Write a default config to the XDG path if no config exists.
+
+    Returns the path to the newly written file, or None if a config
+    already exists in any search location.
+    """
+    search_paths = ["./zeroforge.yaml", "./zeroforge.yml", *_user_config_paths()]
+    for candidate in search_paths:
+        if Path(candidate).expanduser().exists():
+            return None
+
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "")
+    if xdg_config_home:
+        config_dir = Path(xdg_config_home).expanduser()
+    else:
+        config_dir = Path.home() / ".config"
+    app_dir = config_dir / "zeroforge"
+    app_dir.mkdir(parents=True, exist_ok=True)
+    config_path = app_dir / "config.yaml"
+    config_path.write_text(DEFAULT_CONFIG_TEMPLATE, encoding="utf-8")
+    return config_path
+
+
 def load_config(path: str | Path | None = None) -> Settings:
     """Load settings from YAML, environment variables, and defaults."""
     yaml_data: dict[str, Any] = {}

@@ -316,6 +316,91 @@ def test_local_config_takes_priority_over_xdg(tmp_path, monkeypatch, clean_env):
     assert settings.models.smart.model == "local-model"
 
 
+# --- ensure_default_config tests -----------------------------------------
+
+
+def test_ensure_default_config_writes_when_none(tmp_path, monkeypatch, clean_env):
+    """ensure_default_config writes a default config to XDG path when none exists."""
+    from zero_forge.config import ensure_default_config
+
+    xdg_dir = tmp_path / "xdg"
+    xdg_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+
+    result = ensure_default_config()
+    assert result is not None
+    assert result.exists()
+    assert result == xdg_dir / "zeroforge" / "config.yaml"
+
+
+def test_ensure_default_config_returns_none_when_exists(tmp_path, monkeypatch, clean_env):
+    """ensure_default_config returns None when a config already exists."""
+    from zero_forge.config import ensure_default_config
+
+    xdg_dir = tmp_path / "xdg"
+    app_dir = xdg_dir / "zeroforge"
+    app_dir.mkdir(parents=True)
+    (app_dir / "config.yaml").write_text("models:\n  smart:\n    model: existing\n")
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+
+    result = ensure_default_config()
+    assert result is None
+
+
+def test_ensure_default_config_returns_none_when_local_exists(tmp_path, monkeypatch, clean_env):
+    """ensure_default_config returns None when a local config already exists."""
+    from zero_forge.config import ensure_default_config
+
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    (work_dir / "zeroforge.yaml").write_text("models:\n  smart:\n    model: local\n")
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.chdir(work_dir)
+
+    result = ensure_default_config()
+    assert result is None
+
+
+def test_ensure_default_config_written_file_loads(tmp_path, monkeypatch, clean_env):
+    """The default config written by ensure_default_config is loadable."""
+    from zero_forge.config import ensure_default_config, load_config
+
+    xdg_dir = tmp_path / "xdg"
+    xdg_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+
+    written_path = ensure_default_config()
+    assert written_path is not None
+
+    settings = load_config()
+    assert settings.models.smart.model == "gpt-4o"
+    assert settings.models.tool.model == "gpt-4o-mini"
+    assert settings.output.dir == "./output"
+
+
+def test_ensure_default_config_falls_back_to_home(tmp_path, monkeypatch, clean_env):
+    """ensure_default_config falls back to ~/.config when XDG_CONFIG_HOME unset."""
+    from zero_forge.config import ensure_default_config
+
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    # Use a fake home so we don't write to the real one
+    fake_home = tmp_path / "fake-home"
+    fake_home.mkdir()
+    monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+    result = ensure_default_config()
+    assert result is not None
+    assert result == fake_home / ".config" / "zeroforge" / "config.yaml"
+    assert result.exists()
+
+
 # --- .env file loading tests (issue #109) --------------------------------
 
 

@@ -9,7 +9,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .config import get_settings
+from .config import ensure_default_config, get_settings
 from .logging_config import setup_logging_from_settings
 from .schemas import ArtifactType, VulnerabilityInput, WorkflowState
 from .workflow import run_workflow
@@ -112,11 +112,7 @@ def _print_result_table(
     table.add_column("Errors")
 
     for artifact_type, result in results:
-        valid = (
-            str(result.validation.is_valid)
-            if result.validation
-            else "—"
-        )
+        valid = str(result.validation.is_valid) if result.validation else "—"
         errors = (
             "\n".join(result.validation.errors)
             if result.validation and result.validation.errors
@@ -134,9 +130,7 @@ def _print_result_table(
 
     for artifact_type, result in results:
         if result.output_path:
-            console.print(
-                f"[green]✓[/] {artifact_type.value}: {result.output_path}"
-            )
+            console.print(f"[green]✓[/] {artifact_type.value}: {result.output_path}")
 
 
 @app.command()
@@ -157,11 +151,13 @@ def generate(
     writeup_file: str = typer.Option("", "--writeup", "-w", help="Path to vulnerability write-up"),
     source_path: str = typer.Option("", "--source", "-s", help="Path to vulnerable source code"),
     patch_file: str = typer.Option("", "--patch", "-d", help="Path to patch/diff file"),
-    output_dir: str = typer.Option("", "--output", "-o",
-                              help="Output directory (overrides config)"),
+    output_dir: str = typer.Option(
+        "", "--output", "-o", help="Output directory (overrides config)"
+    ),
     config_file: str = typer.Option("", "--config", help="Path to YAML config file"),
     unsafe: bool = typer.Option(
-        False, "--unsafe",
+        False,
+        "--unsafe",
         help="Allow reading secrets and following symlinks during source collection",
     ),
 ) -> None:
@@ -171,6 +167,14 @@ def generate(
     New artifact types can be added by extending the ArtifactType enum,
     registering an ArtifactProfile, a validator, and example files.
     """
+    if not config_file:
+        new_config = ensure_default_config()
+        if new_config is not None:
+            console.print(
+                f"[yellow]Created default config at {new_config}.[/]\n"
+                "[yellow]Edit it to configure your models and API keys, then re-run.[/]"
+            )
+
     _apply_env_overrides(output_dir=output_dir, unsafe=unsafe, config_file=config_file)
     setup_logging_from_settings()
 
@@ -205,6 +209,7 @@ def generate(
 def tools() -> None:
     """List available tools in the registry."""
     from .agents.tool_agent import ToolAgent
+
     agent = ToolAgent()
     table = Table(title="Registered Tools")
     table.add_column("Name", style="cyan")
@@ -221,6 +226,7 @@ def validate(
 ) -> None:
     """Validate an existing artifact file."""
     from .agents.tool_agent import ToolAgent
+
     content = Path(file).read_text(encoding="utf-8", errors="replace")
     agent = ToolAgent()
     result = agent.validate_artifact(content, artifact_type)
