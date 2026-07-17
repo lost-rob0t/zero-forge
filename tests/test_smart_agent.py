@@ -581,3 +581,310 @@ def test_resolve_provider_without_key(monkeypatch):
 
     api_key, _model, _ = _resolve_provider()
     assert api_key is None
+
+
+# --- Async Smart Agent tests (issue #83 / PR #116 review B1) -------------
+
+import asyncio  # noqa: E402
+
+from zero_forge.agents.smart_agent import (  # noqa: E402
+    generate_artifact_async,
+    repair_artifact_async,
+)
+
+
+def _install_async_litellm(monkeypatch, acompletion) -> None:
+    """Patch litellm.acompletion for async tests.
+
+    Preserves ``litellm.completion`` from a prior ``_install_litellm`` call so
+    sync+async parity tests can use both paths.
+    """
+    existing = sys.modules.get("litellm")
+    completion = getattr(existing, "completion", None)
+    monkeypatch.setitem(
+        sys.modules, "litellm",
+        SimpleNamespace(completion=completion, acompletion=acompletion),
+    )
+
+
+def _async_response(content: str):
+    """Create a fake async acompletion that returns *content*."""
+    async def _acompletion(**_kw):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+        )
+    return _acompletion
+
+
+def test_generate_artifact_async_normal_output(monkeypatch):
+    """generate_artifact_async produces correct content, filename, and metadata."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_async_litellm(
+        monkeypatch,
+        _async_response(
+            "```ruby\nclass MetasploitModule\nend\n```"
+        ),
+    )
+
+    coro = generate_artifact_async(
+        VulnerabilityInput(cve_id="CVE-2021-44228"),
+        _context(),
+    )
+    artifact = asyncio.run(coro)
+
+    assert artifact.artifact_type == ArtifactType.METASPLOIT
+    assert "MetasploitModule" in artifact.content
+    assert artifact.filename == "cve_2021_44228_exploit.rb"
+    assert artifact.metadata["model_role"] == "smart"
+    assert artifact.metadata["cve_id"] == "CVE-2021-44228"
+    assert artifact.metadata["artifact_type"] == "metasploit"
+    assert artifact.metadata["stub"] is False
+
+
+def test_generate_artifact_async_on_chunk_forwarding(monkeypatch):
+    """generate_artifact_async forwards on_chunk into call_model_async."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_async_litellm(monkeypatch, _async_streaming_acompletion("hello world"))
+
+    chunks: list[str] = []
+    artifact = asyncio.run(generate_artifact_async(
+        VulnerabilityInput(cve_id="CVE-2021-44228"),
+        _context(),
+        on_chunk=chunks.append,
+    ))
+
+    assert "hello world" in artifact.content
+    assert len(chunks) > 0
+    assert "".join(chunks) == "hello world"
+
+
+def test_generate_artifact_async_stub_mode(monkeypatch):
+    """generate_artifact_async stub mode works without a provider key."""
+    monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    artifact = asyncio.run(generate_artifact_async(
+        VulnerabilityInput(cve_id="CVE-2021-44228"),
+        _context(),
+    ))
+
+    assert artifact.metadata["stub"] is True
+    assert "MetasploitModule" in artifact.content
+
+
+def test_generate_artifact_async_refusal(monkeypatch, capsys):
+    """generate_artifact_async refusal parity with sync path."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_async_litellm(
+        monkeypatch,
+        _async_response("I cannot help with that."),
+    )
+
+    artifact = asyncio.run(generate_artifact_async(
+        VulnerabilityInput(cve_id="CVE-2021-44228"),
+        _context(),
+    ))
+
+    assert "ZeroForge WARNING" in artifact.content
+    assert "refusal" in artifact.content.lower()
+    captured = capsys.readouterr()
+    assert "ZeroForge WARNING" in captured.out
+
+
+def test_repair_artifact_async_normal_output(monkeypatch):
+    """repair_artifact_async produces repaired=True metadata and new content."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_async_litellm(
+        monkeypatch,
+        _async_response(
+            "```ruby\nclass MetasploitModule\nend\n```"
+        ),
+    )
+
+    original = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class Foo\nend",
+        filename="test.rb",
+        metadata={"stub": False, "model": "test-model"},
+    )
+    validation = ValidationResult(is_valid=False, errors=["Missing method"])
+
+    repaired = asyncio.run(repair_artifact_async(original, validation, _context()))
+
+    assert repaired.artifact_type == ArtifactType.METASPLOIT
+    assert repaired.filename == "test.rb"
+    assert "MetasploitModule" in repaired.content
+    assert repaired.metadata["repaired"] is True
+    assert repaired.metadata["stub"] is False
+
+
+def test_repair_artifact_async_refusal_returns_original(monkeypatch, capsys):
+    """repair_artifact_async refusal returns original artifact (parity with sync)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_async_litellm(
+        monkeypatch,
+        _async_response("I cannot help with that."),
+    )
+
+    original = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend",
+        filename="test.rb",
+    )
+    validation = ValidationResult(is_valid=False, errors=["Missing method"])
+
+    repaired = asyncio.run(repair_artifact_async(original, validation, _context()))
+
+    assert repaired is original
+    captured = capsys.readouterr()
+    assert "ZeroForge WARNING" in captured.out
+    assert "repair" in captured.out.lower()
+
+
+def test_repair_artifact_async_empty_output_returns_original(monkeypatch):
+    """Empty repair output from async path returns original artifact."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_async_litellm(
+        monkeypatch,
+        _async_response("```ruby\n\n```"),
+    )
+
+    original = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend",
+        filename="test.rb",
+    )
+    validation = ValidationResult(is_valid=False, errors=["Missing method"])
+
+    repaired = asyncio.run(repair_artifact_async(original, validation, _context()))
+
+    assert repaired is original
+
+
+def test_repair_artifact_async_stub_mode(monkeypatch):
+    """repair_artifact_async stub mode marks metadata correctly."""
+    monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    original = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class MetasploitModule\nend",
+        filename="test.rb",
+        metadata={"stub": False, "model": "test-model"},
+    )
+    validation = ValidationResult(is_valid=False, errors=["Missing method"])
+
+    repaired = asyncio.run(repair_artifact_async(original, validation, _context()))
+
+    assert repaired.metadata["stub"] is True
+    assert repaired.metadata["repaired"] is True
+
+
+@pytest.mark.parametrize(
+    ("artifact_type", "suffix", "marker"),
+    [
+        (ArtifactType.METASPLOIT, "_exploit.rb", "MetasploitModule"),
+        (ArtifactType.ZAP_ACTIVE, "_zap_active.js", "function scan(as, msg, param, value)"),
+        (ArtifactType.ZAP_PASSIVE, "_zap_passive.js", "function scan(ps, msg, src)"),
+    ],
+)
+def test_generate_artifact_async_artifact_type_parity(
+    monkeypatch, artifact_type, suffix, marker
+):
+    """generate_artifact_async produces correct output for each artifact type."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_async_litellm(
+        monkeypatch,
+        _async_response(f"```{artifact_type.value}\n{marker}\n```"),
+    )
+
+    artifact = asyncio.run(generate_artifact_async(
+        VulnerabilityInput(cve_id="CVE-2021-44228", artifact_type=artifact_type),
+        _context(),
+    ))
+
+    assert artifact.artifact_type == artifact_type
+    assert artifact.filename.endswith(suffix)
+    assert marker in artifact.content
+
+
+def test_sync_async_generation_metadata_parity(monkeypatch):
+    """Sync and async generation produce equivalent metadata structure."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_litellm(
+        monkeypatch,
+        lambda **_kw: SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="```ruby\nclass X\nend\n```"))]
+        ),
+    )
+    _install_async_litellm(
+        monkeypatch,
+        _async_response("```ruby\nclass X\nend\n```"),
+    )
+
+    sync_artifact = generate_artifact(
+        VulnerabilityInput(cve_id="CVE-2021-44228"),
+        _context(),
+    )
+    async_artifact = asyncio.run(generate_artifact_async(
+        VulnerabilityInput(cve_id="CVE-2021-44228"),
+        _context(),
+    ))
+
+    assert sync_artifact.metadata.keys() == async_artifact.metadata.keys()
+    assert sync_artifact.filename == async_artifact.filename
+    assert sync_artifact.artifact_type == async_artifact.artifact_type
+
+
+def test_sync_async_repair_content_parity(monkeypatch):
+    """Sync and async repair produce equivalent content and metadata."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _install_litellm(
+        monkeypatch,
+        lambda **_kw: SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="```ruby\nclass MetasploitModule\nend\n```"))]
+        ),
+    )
+    _install_async_litellm(
+        monkeypatch,
+        _async_response("```ruby\nclass MetasploitModule\nend\n```"),
+    )
+
+    original = Artifact(
+        artifact_type=ArtifactType.METASPLOIT,
+        content="class Foo\nend",
+        filename="test.rb",
+        metadata={"stub": False, "model": "test-model"},
+    )
+    validation = ValidationResult(is_valid=False, errors=["Missing method"])
+
+    sync_repaired = repair_artifact(original, validation, _context())
+    async_repaired = asyncio.run(repair_artifact_async(original, validation, _context()))
+
+    assert sync_repaired.content == async_repaired.content
+    assert sync_repaired.metadata["repaired"] == async_repaired.metadata["repaired"]
+    assert sync_repaired.metadata["stub"] == async_repaired.metadata["stub"]
+
+
+def _async_streaming_acompletion(content: str):
+    """Create an async acompletion mock that streams *content* as chunks."""
+    class _FakeChunk:
+        def __init__(self, c):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": c})(),
+            })()]
+
+    async def _acompletion(**kwargs):
+        async def _gen():
+            words = content.split(" ")
+            for i, word in enumerate(words):
+                yield _FakeChunk(word)
+                if i < len(words) - 1:
+                    yield _FakeChunk(" ")
+        return _gen()
+
+    return _acompletion

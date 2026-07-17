@@ -407,12 +407,16 @@ def _check_refusal(code: str, phase: str) -> str:
     return f"# ZeroForge WARNING: {msg}\n"
 
 
-def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext) -> Artifact:
-    artifact_type = vuln_input.artifact_type
-    logger.info("Generating artifact for CVE %s", context.cve_id)
-    logger.debug("Building context prompt for CVE %s", context.cve_id)
-    prompt = _build_context_prompt(vuln_input, context)
-    raw = _call_llm(_system_prompt(artifact_type), prompt, artifact_type)
+def _finalize_generation(
+    raw: str, artifact_type: ArtifactType, cve_id: str
+) -> Artifact:
+    """Shared post-processing for artifact generation (sync and async).
+
+    Extracts the code block, checks for refusals, and builds the Artifact with
+    standard metadata.  Called by both ``generate_artifact`` and
+    ``generate_artifact_async`` so that extraction, refusal handling, and
+    metadata construction live in one place.
+    """
     code = _extract_code_block(raw, artifact_type)
     logger.debug("Extracted code block: %d chars", len(code))
     code = _check_refusal(code, "generation")
@@ -420,15 +424,51 @@ def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext)
     return Artifact(
         artifact_type=artifact_type,
         content=code,
-        filename=_artifact_filename(context.cve_id, artifact_type),
+        filename=_artifact_filename(cve_id, artifact_type),
         metadata={
             "model": cfg.models.smart.model,
             "model_role": "smart",
-            "cve_id": context.cve_id,
+            "cve_id": cve_id,
             "artifact_type": artifact_type.value,
             "stub": cfg.llm.stub_mode,
         },
     )
+
+
+def _finalize_repair(raw: str, artifact: Artifact) -> Artifact:
+    """Shared post-processing for artifact repair (sync and async).
+
+    Extracts the code block, checks for refusals and empty output, and builds
+    the repaired Artifact with updated metadata.  Called by both
+    ``repair_artifact`` and ``repair_artifact_async`` so that refusal logic,
+    empty-output handling, and metadata construction live in one place.
+    """
+    code = _extract_code_block(raw, artifact.artifact_type)
+    if _is_refusal(code):
+        _check_refusal(code, "repair")
+        return artifact
+    if not code.strip():
+        logger.warning("Repair produced empty code block; returning original artifact")
+        return artifact
+    cfg = get_settings()
+    new_metadata = {**artifact.metadata, "repaired": True}
+    if cfg.llm.stub_mode:
+        new_metadata["stub"] = True
+    return Artifact(
+        artifact_type=artifact.artifact_type,
+        content=code,
+        filename=artifact.filename,
+        metadata=new_metadata,
+    )
+
+
+def generate_artifact(vuln_input: VulnerabilityInput, context: CollectedContext) -> Artifact:
+    artifact_type = vuln_input.artifact_type
+    logger.info("Generating artifact for CVE %s", context.cve_id)
+    logger.debug("Building context prompt for CVE %s", context.cve_id)
+    prompt = _build_context_prompt(vuln_input, context)
+    raw = _call_llm(_system_prompt(artifact_type), prompt, artifact_type)
+    return _finalize_generation(raw, artifact_type, context.cve_id)
 
 
 def repair_artifact(
@@ -449,26 +489,11 @@ def repair_artifact(
         artifact, validation, attempt=attempt, max_attempts=max_attempts
     )
     raw = _call_llm(_system_prompt(artifact.artifact_type), prompt, artifact.artifact_type)
-    code = _extract_code_block(raw, artifact.artifact_type)
-    if _is_refusal(code):
-        _check_refusal(code, "repair")
-        return artifact
-    if not code.strip():
-        logger.warning("Repair produced empty code block; returning original artifact")
-        return artifact
-    cfg = get_settings()
-    new_metadata = {**artifact.metadata, "repaired": True}
-    if cfg.llm.stub_mode:
-        new_metadata["stub"] = True
-    return Artifact(
-        artifact_type=artifact.artifact_type,
-        content=code,
-        filename=artifact.filename,
-        metadata=new_metadata,
-    )
+    return _finalize_repair(raw, artifact)
 
 
 # --- Async variants (issue #83) -----------------------------------------
+
 
 async def generate_artifact_async(
     vuln_input: VulnerabilityInput,
@@ -476,7 +501,11 @@ async def generate_artifact_async(
     *,
     on_chunk: Callable[[str], None] | None = None,
 ) -> Artifact:
-    """Async variant of generate_artifact with optional streaming callback."""
+    """Async variant of generate_artifact with optional streaming callback.
+
+    Delegates post-processing to :func:`_finalize_generation` so that sync and
+    async paths share identical extraction, refusal, and metadata logic.
+    """
     artifact_type = vuln_input.artifact_type
     logger.info("Generating artifact (async) for CVE %s", context.cve_id)
     prompt = _build_context_prompt(vuln_input, context)
@@ -489,20 +518,7 @@ async def generate_artifact_async(
             _system_prompt(artifact_type), prompt,
             on_chunk=on_chunk,
         )
-    code = _extract_code_block(raw, artifact_type)
-    code = _check_refusal(code, "generation")
-    return Artifact(
-        artifact_type=artifact_type,
-        content=code,
-        filename=_artifact_filename(context.cve_id, artifact_type),
-        metadata={
-            "model": cfg.models.smart.model,
-            "model_role": "smart",
-            "cve_id": context.cve_id,
-            "artifact_type": artifact_type.value,
-            "stub": cfg.llm.stub_mode,
-        },
-    )
+    return _finalize_generation(raw, artifact_type, context.cve_id)
 
 
 async def repair_artifact_async(
@@ -514,7 +530,11 @@ async def repair_artifact_async(
     max_attempts: int = 0,
     on_chunk: Callable[[str], None] | None = None,
 ) -> Artifact:
-    """Async variant of repair_artifact with optional streaming callback."""
+    """Async variant of repair_artifact with optional streaming callback.
+
+    Delegates post-processing to :func:`_finalize_repair` so that sync and
+    async paths share identical refusal, empty-output, and metadata logic.
+    """
     logger.info(
         "Repairing artifact (async) (%d validation errors, attempt %d/%d)",
         len(validation.errors),
@@ -533,19 +553,4 @@ async def repair_artifact_async(
             _system_prompt(artifact.artifact_type), prompt,
             on_chunk=on_chunk,
         )
-    code = _extract_code_block(raw, artifact.artifact_type)
-    if _is_refusal(code):
-        _check_refusal(code, "repair")
-        return artifact
-    if not code.strip():
-        logger.warning("Repair produced empty code block; returning original artifact")
-        return artifact
-    new_metadata = {**artifact.metadata, "repaired": True}
-    if cfg.llm.stub_mode:
-        new_metadata["stub"] = True
-    return Artifact(
-        artifact_type=artifact.artifact_type,
-        content=code,
-        filename=artifact.filename,
-        metadata=new_metadata,
-    )
+    return _finalize_repair(raw, artifact)

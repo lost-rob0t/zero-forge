@@ -447,6 +447,13 @@ async def call_model_async(
 
     When ``on_chunk`` is provided, enables streaming (``stream=True``)
     and invokes the callback for each text chunk as it arrives.
+
+    Streaming does not retry on token exhaustion.  Once partial chunks have
+    been delivered to the caller via ``on_chunk``, replaying the request
+    would duplicate already-seen output.  The non-streaming path retains
+    the full token-exhaustion retry loop.  If a streaming response yields
+    empty content, an ``LLMResponseError`` is raised so the caller can
+    decide whether to fall back to a non-streaming retry.
     """
     resolved = resolve_model(role, config)
     if not resolved.api_key:
@@ -486,6 +493,10 @@ async def call_model_async(
     import litellm
 
     # --- Streaming path ---
+    # Streaming does not retry on token exhaustion. Once partial chunks have
+    # been delivered to the caller via on_chunk, replaying the request would
+    # duplicate already-seen output. The non-streaming path retains the full
+    # token-exhaustion retry loop.
     if on_chunk is not None:
         try:
             response = await litellm.acompletion(
@@ -509,6 +520,7 @@ async def call_model_async(
             ) from exc
 
         collected: list[str] = []
+        _callback_phase = False
         try:
             async for chunk in response:
                 try:
@@ -517,8 +529,16 @@ async def call_model_async(
                     continue
                 if isinstance(delta, str) and delta:
                     collected.append(delta)
+                    # Callback errors are consumer/UI failures, not provider
+                    # failures.  Use a phase flag so the except handler below
+                    # can distinguish provider-iteration errors from callback
+                    # errors and let the latter propagate unchanged.
+                    _callback_phase = True
                     on_chunk(delta)
+                    _callback_phase = False
         except Exception as exc:
+            if _callback_phase:
+                raise
             raise LLMProviderError(
                 f"LLM async streaming failed with {type(exc).__name__}",
                 role=role,
@@ -625,11 +645,20 @@ async def stream_model(
     config: ModelConfig,
     system_prompt: str,
     user_prompt: str,
-    **kwargs: Any,
+    *,
+    additional_messages: list[dict[str, str]] | None = None,
+    attempt: int = 1,
+    max_attempts: int = 1,
 ) -> AsyncIterator[str]:
     """Async generator yielding text chunks from litellm.acompletion(stream=True).
 
-    Raises the same LLMCallError hierarchy on failure.
+    Raises the same ``LLMCallError`` hierarchy on failure, including
+    ``attempt`` and ``max_attempts`` context.
+
+    Streaming does not retry on token exhaustion.  Once partial chunks have
+    been yielded to the caller, replaying the request would duplicate
+    already-seen output.  Callers that need token-exhaustion retry semantics
+    should use :func:`call_model_async` without ``on_chunk``.
     """
     resolved = resolve_model(role, config)
     if not resolved.api_key:
@@ -639,14 +668,16 @@ async def stream_model(
             provider=resolved.provider,
             model=resolved.model,
             retryable=False,
+            attempt=attempt,
+            max_attempts=max_attempts,
         )
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
-    if kwargs.get("additional_messages"):
-        messages.extend(kwargs["additional_messages"])
+    if additional_messages:
+        messages.extend(additional_messages)
 
     max_tokens = config.max_tokens
     if config.auto_max_tokens:
@@ -677,6 +708,8 @@ async def stream_model(
             provider=resolved.provider,
             model=resolved.model,
             retryable=_is_retryable_provider_error(exc),
+            attempt=attempt,
+            max_attempts=max_attempts,
         ) from exc
 
     try:
@@ -694,4 +727,6 @@ async def stream_model(
             provider=resolved.provider,
             model=resolved.model,
             retryable=_is_retryable_provider_error(exc),
+            attempt=attempt,
+            max_attempts=max_attempts,
         ) from exc
