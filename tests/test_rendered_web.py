@@ -45,7 +45,11 @@ def test_fetch_rendered_page_converts_html_to_markdown_and_chunks():
         "scroll_steps": 3,
         "scroll_limited": False,
     }
-    converter = lambda html, **kwargs: "# Rendered Advisory\n\nFull body.\n\n" + ("x" * 3000)
+
+    def converter(html, **kwargs):
+        del html, kwargs
+        return "# Rendered Advisory\n\nFull body.\n\n" + ("x" * 3000)
+
     public_address = [(2, 1, 6, "", ("93.184.216.34", 443))]
 
     with (
@@ -72,7 +76,7 @@ def test_fetch_rendered_page_converts_html_to_markdown_and_chunks():
     assert result["format"] == "markdown"
     assert result["markdown"].startswith("# Rendered Advisory")
     assert result["chunk_count"] >= 3
-    assert "".join(result["markdown_chunks"]).replace("\n", "")
+    assert "Full body." in "\n".join(result["markdown_chunks"])
     assert result["truncated"] is False
     assert result["scroll_steps"] == 3
 
@@ -90,6 +94,11 @@ def test_fetch_rendered_page_marks_content_limit():
         "scroll_steps": 0,
         "scroll_limited": False,
     }
+
+    def converter(html, **kwargs):
+        del html, kwargs
+        return "z" * 2_000
+
     public_address = [(2, 1, 6, "", ("93.184.216.34", 443))]
 
     with (
@@ -103,7 +112,7 @@ def test_fetch_rendered_page_marks_content_limit():
         ),
         patch(
             "zero_forge.tools.rendered_web._load_markdown_converter",
-            return_value=lambda html, **kwargs: "z" * 2_000,
+            return_value=converter,
         ),
     ):
         result = fetch_rendered_web_page(
