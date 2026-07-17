@@ -125,7 +125,7 @@ def _parse_analysis(text: str) -> tuple[ThreatModel, list[SecurityHypothesis]]:
 
 
 def _seed_descriptor(request: VariantAnalysisRequest) -> dict[str, Any]:
-    package = None
+    package: dict[str, str] | None = None
     if request.seed_package_name:
         package = {
             "name": request.seed_package_name,
