@@ -89,6 +89,7 @@ candidate + hypothesis + admitted source
   -> deterministic syntax and artifact validation
   -> Smart Agent repairs validator errors
   -> repeat within max_iterations
+  -> publish a validator-clean investigation tree
 ```
 
 The workspace uses basename-only paths, rejects symlinks and path traversal, writes files
@@ -96,6 +97,33 @@ atomically, and applies private directory and file permissions. The loop support
 ZAP active, ZAP passive, and Python experiment artifacts. It validates drafts but deliberately
 does **not** execute them. A draft that passes syntax and structural validation is still not a
 confirmed vulnerability.
+
+Only completed, validator-clean sessions are moved from `/tmp` into the configured output
+directory. Failed and exhausted sessions remain beneath `/tmp/zeroforge` for inspection.
+Published investigations use this tree:
+
+```text
+output/<investigation-id>/
+├── findings/
+│   ├── hypothesis.md|org|json
+│   ├── candidate.md|org|json
+│   └── result.md|org|json
+├── evidence/
+│   └── validation/
+│       └── iteration-XX.md|org|json
+├── poc/
+│   ├── <final-artifact>
+│   └── iterations/
+│       └── iteration-XX.<ext>
+└── research/
+    ├── web-results.md|org|json
+    ├── fetched-pages.md|org|json
+    └── errors.md|org|json
+```
+
+The `draft` CLI defaults to Markdown and Org output. Repeated `--format` flags select any
+combination of `markdown`, `org`, and `json`; `--all-formats` emits all three. JSON remains
+available but is opt-in.
 
 Tree-sitter is not required for this slice. Existing Ruby, JavaScript, Python, source-search,
 and future Semgrep/compiler adapters provide the needed initial structure. A Tree-sitter
@@ -120,8 +148,8 @@ vulnerability.
 
 ## Work required for a complete workflow
 
-The current implementation reaches validated experiment drafting but not execution. A complete
-discovery workflow still requires these slices, in dependency order:
+The current implementation reaches validated experiment drafting and publication but not
+execution. A complete discovery workflow still requires these slices, in dependency order:
 
 1. **Target and build identity**
    - resolve repository commit, package versions, lockfiles, build flags, enabled features,
