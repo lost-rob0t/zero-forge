@@ -1,4 +1,4 @@
-"""Publish completed exploit investigations from /tmp into the configured output tree."""
+"""Publish completed investigations from /tmp into the configured output tree."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 OutputFormat = Literal["markdown", "org", "json"]
 
@@ -46,7 +46,7 @@ def _formats(values: list[str]) -> list[OutputFormat]:
         lowered = value.strip().lower()
         if lowered not in _ALLOWED_FORMATS:
             raise ValueError(f"unsupported output format: {value}")
-        typed: OutputFormat = lowered  # type: ignore[assignment]
+        typed = cast(OutputFormat, lowered)
         if typed not in normalized:
             normalized.append(typed)
     if not normalized:
@@ -186,13 +186,31 @@ def publish_exploit_bundle(
 
     written: list[str] = []
     written.extend(
-        _write_document(tree["findings"], "hypothesis", "Security Hypothesis", hypothesis, formats)
+        _write_document(
+            tree["findings"],
+            "hypothesis",
+            "Security Hypothesis",
+            hypothesis,
+            formats,
+        )
     )
     written.extend(
-        _write_document(tree["findings"], "candidate", "Candidate Finding", candidate, formats)
+        _write_document(
+            tree["findings"],
+            "candidate",
+            "Candidate Finding",
+            candidate,
+            formats,
+        )
     )
     written.extend(
-        _write_document(tree["findings"], "result", "Investigation Result", result, formats)
+        _write_document(
+            tree["findings"],
+            "result",
+            "Investigation Result",
+            result,
+            formats,
+        )
     )
 
     for index, iteration in enumerate(iterations, start=1):
@@ -208,17 +226,39 @@ def publish_exploit_bundle(
         )
 
     written.extend(
-        _write_document(tree["research"], "web-results", "Web Search Results", web_results, formats)
+        _write_document(
+            tree["research"],
+            "web-results",
+            "Web Search Results",
+            web_results,
+            formats,
+        )
     )
     written.extend(
-        _write_document(tree["research"], "fetched-pages", "Fetched Research Pages", fetched_pages, formats)
+        _write_document(
+            tree["research"],
+            "fetched-pages",
+            "Fetched Research Pages",
+            fetched_pages,
+            formats,
+        )
     )
     written.extend(
-        _write_document(tree["research"], "errors", "Research Errors", research_errors, formats)
+        _write_document(
+            tree["research"],
+            "errors",
+            "Research Errors",
+            research_errors,
+            formats,
+        )
     )
 
     final_artifact = tree["poc"] / filename
-    if not final_artifact.exists() or not final_artifact.is_file() or final_artifact.is_symlink():
+    if (
+        not final_artifact.exists()
+        or not final_artifact.is_file()
+        or final_artifact.is_symlink()
+    ):
         raise FileNotFoundError(f"completed artifact not found in poc/: {filename}")
 
     root = Path(output_dir).expanduser().resolve()
@@ -229,7 +269,13 @@ def publish_exploit_bundle(
     if destination.exists() or destination.is_symlink():
         raise FileExistsError(f"investigation output already exists: {destination}")
 
-    staging = Path(tempfile.mkdtemp(prefix=f".{normalized_id}.", suffix=".tmp", dir=root))
+    staging = Path(
+        tempfile.mkdtemp(
+            prefix=f".{normalized_id}.",
+            suffix=".tmp",
+            dir=root,
+        )
+    )
     staging.rmdir()
     try:
         _move_tree(workspace, staging)
