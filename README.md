@@ -68,6 +68,7 @@ Two models. Hard role separation.
 - [`uv`](https://docs.astral.sh/uv/)
 - Ruby **3.3.8** for Metasploit validation
 - An OpenRouter, OpenAI, or Anthropic API key
+- Optional Brave Search or Tavily API key for public web research
 
 ```bash
 git clone https://github.com/lost-rob0t/zero-forge.git
@@ -87,6 +88,16 @@ ZeroForge automatically loads a `.env` file from the working directory before re
 ```bash
 export ZERO_FORGE_ENV_FILE=/path/to/.env
 ```
+
+For bounded public web research, configure one search provider. Brave is preferred when both are present:
+
+```bash
+export BRAVE_SEARCH_API_KEY='...'
+# or
+export TAVILY_API_KEY='...'
+```
+
+Search credentials are read directly by the web tool. They are not exposed to the Tool Agent or included in model prompts.
 
 Generate a Metasploit module:
 
@@ -123,6 +134,15 @@ uv run zero-forge validate exploit.rb
 uv run zero-forge validate active-rule.js --type zap_active_scan
 uv run zero-forge validate passive-rule.js --type zap_passive_scan
 ```
+
+## Seeded discovery API
+
+The discovery package provides two separate bounded APIs:
+
+- `run_variant_analysis()` derives threat models, falsifiable hypotheses, and static candidates.
+- `run_exploit_iteration()` optionally searches the public web, creates a private workspace beneath `/tmp/zeroforge`, and repeatedly drafts and validates an exploit artifact using validator feedback.
+
+The iterative drafting loop does not execute the generated artifact and cannot confirm a finding. See [`docs/discovery.md`](docs/discovery.md) for the workflow, web-source policy, temp-workspace boundary, and remaining runtime-verification work.
 
 ## Configuration
 
@@ -167,6 +187,8 @@ ZeroForge is built to fail closed:
 - malformed or disallowed Tool Agent calls are rejected and repaired within budget;
 - artifact examples are selected by type and bounded by count and total size;
 - oversized examples are skipped instead of silently truncated;
+- web searches and page fetches have provider, query, domain, address, size, count, and timeout bounds;
+- exploit drafts remain beneath `/tmp/zeroforge`, use private permissions, and are never executed by the drafting loop;
 - missing Ruby blocks Metasploit validation;
 - passive ZAP rules fail when they attempt active behavior;
 - stub mode never produces a successful artifact.
@@ -176,7 +198,8 @@ ZeroForge is built to fail closed:
 ```text
 zero_forge/
 ├── agents/          smart and tool role implementations
-├── tools/           allowlisted research and validation tools
+├── discovery/       seeded analysis and iterative exploit drafting
+├── tools/           allowlisted research, workspace, and validation tools
 ├── llm_examples/    bounded Metasploit and ZAP references
 ├── workflow.py      LangGraph orchestration and repair loop
 ├── schemas.py       typed state, input, and artifact contracts
