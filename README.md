@@ -126,6 +126,17 @@ uv run zero-forge validate passive-rule.js --type zap_passive_scan
 
 ## Configuration
 
+ZeroForge searches for a config file in the following order, using the first match:
+
+1. A path passed with `--config /path/to/config.yaml`
+2. `ZERO_FORGE_CONFIG_PATH` environment variable
+3. `./zeroforge.yaml` (current directory)
+4. `./zeroforge.yml`
+5. `$XDG_CONFIG_HOME/zeroforge/config.yaml`
+6. `$XDG_CONFIG_HOME/zeroforge/config.yml` (falls back to `~/.config` when `XDG_CONFIG_HOME` is unset or empty)
+
+If no config file exists in any of these locations, the CLI automatically writes a default `config.yaml` to the XDG config directory and prints a message telling you to edit it. This happens only when no `--config` flag is passed.
+
 Smart and Tool roles are configured independently. Do not point both roles at one model and pretend they are separate agents.
 
 ```yaml
