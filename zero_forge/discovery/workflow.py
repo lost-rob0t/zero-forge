@@ -22,6 +22,7 @@ from .schemas import (
     DiscoveryPhase,
     DiscoveryState,
     HypothesisStatus,
+    KnownBugRecord,
     SecurityHypothesis,
     SourceSnapshot,
     StaticEvidence,
@@ -36,8 +37,9 @@ logger = get_logger(__name__)
 _ANALYSIS_SYSTEM_PROMPT = """\
 You are ZeroForge's Smart Agent operating in seeded vulnerability variant-analysis mode.
 
-Start from the supplied historical bug, patch, or root-cause description. Do not perform
-open-ended guessing and do not claim that a vulnerability is confirmed. Produce:
+Start from the supplied historical bug, patch, package advisory, or root-cause description.
+Do not perform open-ended guessing and do not claim that a vulnerability is confirmed.
+Produce:
 
 1. An explicit threat model that identifies attacker control, trust boundaries, protected
    assets, security properties, and scope.
@@ -45,6 +47,7 @@ open-ended guessing and do not claim that a vulnerability is confirmed. Produce:
 3. For every hypothesis, an explicit invariant, candidate source location, concrete source
    search terms, expected violation, expected safe behavior, and confidence basis.
 
+Official advisory records are seed context, not proof that the target contains the bug.
 The Tool Agent, not you, executes source searches. Runtime verification and a control case
 are required before any candidate may become a confirmed finding.
 
@@ -88,7 +91,7 @@ class ToolRunner(Protocol):
 
 
 AnalysisGenerator = Callable[
-    [VariantAnalysisRequest, list[SourceSnapshot], str],
+    [VariantAnalysisRequest, list[SourceSnapshot], str, list[KnownBugRecord]],
     tuple[ThreatModel, list[SecurityHypothesis]],
 ]
 
@@ -121,25 +124,45 @@ def _parse_analysis(text: str) -> tuple[ThreatModel, list[SecurityHypothesis]]:
     return threat_model, hypotheses
 
 
+def _seed_descriptor(request: VariantAnalysisRequest) -> dict[str, Any]:
+    package = None
+    if request.seed_package_name:
+        package = {
+            "name": request.seed_package_name,
+            "ecosystem": request.seed_package_ecosystem,
+            "version": request.seed_package_version,
+        }
+    return {
+        "cve_ids": request.seed_cve_ids,
+        "ghsa_ids": request.seed_ghsa_ids,
+        "package": package,
+        "seed_terms": request.seed_terms,
+    }
+
+
 def _source_prompt(
     request: VariantAnalysisRequest,
     source_files: list[SourceSnapshot],
     diff_summary: str,
+    known_bugs: list[KnownBugRecord],
 ) -> str:
     source_sections: list[str] = []
     for source in source_files[:12]:
         source_sections.append(
             f"### {source.path}\n```{source.language}\n{source.content[:6000]}\n```"
         )
-    terms = ", ".join(request.seed_terms) if request.seed_terms else "(none supplied)"
+    advisory_payload = [record.model_dump(mode="json") for record in known_bugs[:20]]
     return "\n\n".join(
         [
+            "## Requested seed",
+            json.dumps(_seed_descriptor(request), sort_keys=True),
             "## Seed vulnerability or patch",
-            request.seed_summary or "(see supplied diff)",
+            request.seed_summary or "(derived from advisory identifiers or package metadata)",
             "## Seed diff",
             request.seed_diff[:12000] or "(none)",
             f"## Diff summary\n{diff_summary or '(none)'}",
-            f"## Maintainer-provided seed terms\n{terms}",
+            "## Official advisory context",
+            json.dumps(advisory_payload, sort_keys=True) if advisory_payload else "(none)",
             "## Admitted source context",
             "\n\n".join(source_sections) or "(no source files admitted)",
         ]
@@ -150,13 +173,14 @@ def _generate_analysis_with_smart_agent(
     request: VariantAnalysisRequest,
     source_files: list[SourceSnapshot],
     diff_summary: str,
+    known_bugs: list[KnownBugRecord],
 ) -> tuple[ThreatModel, list[SecurityHypothesis]]:
     settings = get_settings()
     raw = call_model(
         "smart",
         settings.models.smart,
         _ANALYSIS_SYSTEM_PROMPT,
-        _source_prompt(request, source_files, diff_summary),
+        _source_prompt(request, source_files, diff_summary, known_bugs),
     )
     return _parse_analysis(raw)
 
@@ -198,8 +222,217 @@ def _tool_failure(result: ToolResult) -> str:
     return result.error.strip()
 
 
+def _run_locked_tool(
+    tool_runner: ToolRunner,
+    *,
+    objective: str,
+    name: str,
+    arguments: dict[str, Any],
+) -> ToolResult:
+    return tool_runner.run(
+        ToolRequest(
+            objective=objective,
+            allowed_tools=[name],
+            arguments=arguments,
+            locked_arguments=arguments,
+        )
+    )
+
+
+def _advisory_records(
+    result: ToolResult,
+    *,
+    source_name: str,
+    errors: list[str],
+) -> list[KnownBugRecord]:
+    if result.error:
+        errors.append(f"{source_name}: {result.error}")
+        return []
+    if not isinstance(result.output, list):
+        errors.append(f"{source_name}: tool returned a non-list response")
+        return []
+
+    records: list[KnownBugRecord] = []
+    for item in result.output:
+        if not isinstance(item, dict):
+            continue
+        try:
+            records.append(KnownBugRecord.model_validate(item))
+        except (TypeError, ValueError) as exc:
+            errors.append(f"{source_name}: rejected malformed advisory record: {exc}")
+    return records
+
+
+def _dedupe_known_bugs(
+    records: list[KnownBugRecord],
+    *,
+    max_results: int,
+) -> list[KnownBugRecord]:
+    output: list[KnownBugRecord] = []
+    seen: set[str] = set()
+    for record in records:
+        identity_values = [record.advisory_id, *record.aliases]
+        key = next((value.upper() for value in identity_values if value), "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        output.append(record)
+        if len(output) >= max_results:
+            break
+    return output
+
+
+def _known_cve_ids(
+    request: VariantAnalysisRequest,
+    records: list[KnownBugRecord],
+) -> list[str]:
+    cve_ids = {value.strip().upper() for value in request.seed_cve_ids if value.strip()}
+    for record in records:
+        for value in [record.advisory_id, *record.aliases]:
+            normalized = value.strip().upper()
+            if normalized.startswith("CVE-"):
+                cve_ids.add(normalized)
+    return sorted(cve_ids)
+
+
+def _apply_kev_context(
+    records: list[KnownBugRecord],
+    kev_entries: list[dict[str, Any]],
+    *,
+    max_results: int,
+) -> list[KnownBugRecord]:
+    kev_by_cve = {
+        str(entry.get("cve_id", "")).upper(): entry
+        for entry in kev_entries
+        if isinstance(entry, dict) and entry.get("cve_id")
+    }
+    enriched: list[KnownBugRecord] = []
+    matched_cves: set[str] = set()
+    for record in records:
+        record_ids = {
+            value.upper() for value in [record.advisory_id, *record.aliases] if value
+        }
+        matching = next((kev_by_cve[cve] for cve in record_ids if cve in kev_by_cve), None)
+        if matching is None:
+            enriched.append(record)
+            continue
+        matched_cves.add(str(matching["cve_id"]).upper())
+        enriched.append(
+            record.model_copy(
+                update={
+                    "exploited_in_wild": True,
+                    "kev_details": matching,
+                }
+            )
+        )
+
+    for cve_id, entry in kev_by_cve.items():
+        if cve_id in matched_cves:
+            continue
+        enriched.append(
+            KnownBugRecord(
+                source="cisa_kev",
+                advisory_id=cve_id,
+                summary=str(entry.get("vulnerability_name", "")),
+                details=str(entry.get("short_description", "")),
+                source_url="https://www.cisa.gov/known-exploited-vulnerabilities-catalog",
+                exploited_in_wild=True,
+                kev_details=entry,
+            )
+        )
+        if len(enriched) >= max_results:
+            break
+    return enriched[:max_results]
+
+
+def _collect_known_bugs(
+    request: VariantAnalysisRequest,
+    tool_runner: ToolRunner,
+) -> tuple[list[KnownBugRecord], list[str]]:
+    if not request.collect_known_bugs:
+        return [], []
+
+    records: list[KnownBugRecord] = []
+    errors: list[str] = []
+    package_name = request.seed_package_name.strip()
+    ecosystem = request.seed_package_ecosystem.strip()
+    version = request.seed_package_version.strip()
+
+    try:
+        if package_name:
+            osv_arguments = {
+                "package_name": package_name,
+                "ecosystem": ecosystem,
+                "version": version,
+                "max_results": request.max_known_bugs,
+                "timeout": request.web_timeout,
+            }
+            result = _run_locked_tool(
+                tool_runner,
+                objective="Query OSV for known vulnerabilities affecting the seed package",
+                name="osv_query",
+                arguments=osv_arguments,
+            )
+            records.extend(
+                _advisory_records(result, source_name="osv_query", errors=errors)
+            )
+
+        if request.seed_cve_ids or request.seed_ghsa_ids or package_name:
+            github_arguments = {
+                "cve_ids": request.seed_cve_ids,
+                "ghsa_ids": request.seed_ghsa_ids,
+                "package_name": package_name,
+                "ecosystem": ecosystem,
+                "version": version,
+                "max_results": request.max_known_bugs,
+                "timeout": request.web_timeout,
+            }
+            result = _run_locked_tool(
+                tool_runner,
+                objective="Query GitHub's public advisory database for seed context",
+                name="github_advisory_search",
+                arguments=github_arguments,
+            )
+            records.extend(
+                _advisory_records(
+                    result,
+                    source_name="github_advisory_search",
+                    errors=errors,
+                )
+            )
+
+        records = _dedupe_known_bugs(records, max_results=request.max_known_bugs)
+        cve_ids = _known_cve_ids(request, records)
+        if cve_ids:
+            kev_arguments = {
+                "cve_ids": cve_ids,
+                "max_results": request.max_known_bugs,
+                "timeout": request.web_timeout,
+            }
+            result = _run_locked_tool(
+                tool_runner,
+                objective="Check whether seed CVEs appear in CISA KEV",
+                name="cisa_kev_lookup",
+                arguments=kev_arguments,
+            )
+            if result.error:
+                errors.append(f"cisa_kev_lookup: {result.error}")
+            elif isinstance(result.output, list):
+                records = _apply_kev_context(
+                    records,
+                    [item for item in result.output if isinstance(item, dict)],
+                    max_results=request.max_known_bugs,
+                )
+            else:
+                errors.append("cisa_kev_lookup: tool returned a non-list response")
+    except (LLMCallError, ToolAgentError) as exc:
+        errors.append(f"advisory tool boundary rejected the request: {exc}")
+
+    return records[: request.max_known_bugs], errors
+
+
 def collect_node(state: DiscoveryState, tool_runner: ToolRunner) -> dict[str, Any]:
-    """Collect bounded source and patch context exclusively through the Tool Agent."""
+    """Collect bounded source, patch, and official advisory seed context."""
 
     request = state.request
     read_arguments = {
@@ -209,13 +442,11 @@ def collect_node(state: DiscoveryState, tool_runner: ToolRunner) -> dict[str, An
         "unsafe": request.unsafe_source,
     }
     try:
-        source_result = tool_runner.run(
-            ToolRequest(
-                objective="Collect bounded source context for seeded variant analysis",
-                allowed_tools=["read_source_files"],
-                arguments=read_arguments,
-                locked_arguments=read_arguments,
-            )
+        source_result = _run_locked_tool(
+            tool_runner,
+            objective="Collect bounded source context for seeded variant analysis",
+            name="read_source_files",
+            arguments=read_arguments,
         )
         if _tool_failure(source_result):
             return {
@@ -244,13 +475,11 @@ def collect_node(state: DiscoveryState, tool_runner: ToolRunner) -> dict[str, An
         diff_summary = ""
         if request.seed_diff:
             diff_arguments = {"diff_text": request.seed_diff, "repo_path": ""}
-            diff_result = tool_runner.run(
-                ToolRequest(
-                    objective="Summarize the supplied seed patch",
-                    allowed_tools=["git_diff_inspect"],
-                    arguments=diff_arguments,
-                    locked_arguments=diff_arguments,
-                )
+            diff_result = _run_locked_tool(
+                tool_runner,
+                objective="Summarize the supplied seed patch",
+                name="git_diff_inspect",
+                arguments=diff_arguments,
             )
             if _tool_failure(diff_result):
                 return {
@@ -275,16 +504,23 @@ def collect_node(state: DiscoveryState, tool_runner: ToolRunner) -> dict[str, An
             "error": "No admissible source context or seed diff was available",
         }
 
+    known_bugs, research_errors = _collect_known_bugs(request, tool_runner)
+    detail = (
+        f"{len(snapshots)} source file(s), {len(known_bugs)} advisory record(s), "
+        f"{len(research_errors)} advisory error(s)"
+    )
     return {
         "source_files": snapshots,
         "diff_summary": diff_summary,
+        "known_bugs": known_bugs,
+        "research_errors": research_errors,
         "phase": DiscoveryPhase.HYPOTHESIZE,
         "status": "context_collected",
         "events": _event(
             state,
             DiscoveryPhase.COLLECT,
             "context_collected",
-            f"{len(snapshots)} source file(s) admitted",
+            detail,
         ),
     }
 
@@ -300,6 +536,7 @@ def hypothesize_node(
             state.request,
             state.source_files,
             state.diff_summary,
+            state.known_bugs,
         )
     except (LLMCallError, ValueError, TypeError) as exc:
         return {
@@ -367,16 +604,14 @@ def investigate_node(state: DiscoveryState, tool_runner: ToolRunner) -> dict[str
                     "unsafe": state.request.unsafe_source,
                     "allowed_paths": admitted_paths,
                 }
-                result = tool_runner.run(
-                    ToolRequest(
-                        objective=(
-                            "Search admitted source files for evidence relevant to "
-                            f"hypothesis {hypothesis.id}"
-                        ),
-                        allowed_tools=["search_code"],
-                        arguments=arguments,
-                        locked_arguments=arguments,
-                    )
+                result = _run_locked_tool(
+                    tool_runner,
+                    objective=(
+                        "Search admitted source files for evidence relevant to "
+                        f"hypothesis {hypothesis.id}"
+                    ),
+                    name="search_code",
+                    arguments=arguments,
                 )
                 searches_run += 1
                 matches = result.output if isinstance(result.output, list) else []
