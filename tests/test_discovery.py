@@ -46,8 +46,9 @@ def _analysis_generator(
     request: VariantAnalysisRequest,
     source_files,
     diff_summary: str,
+    known_bugs,
 ):
-    del request, source_files, diff_summary
+    del request, source_files, diff_summary, known_bugs
     threat_model = ThreatModel(
         attacker_control=["index value supplied by an untrusted caller"],
         trust_boundaries=["public parser input to internal list access"],
@@ -85,9 +86,66 @@ class RecordingRunner:
         return self.delegate.run(request)
 
 
+class AdvisoryRunner(RecordingRunner):
+    def run(self, request: ToolRequest) -> ToolResult:
+        self.requests.append(request)
+        name = request.allowed_tools[0]
+        if name == "github_advisory_search":
+            return ToolResult(
+                name=name,
+                output=[
+                    {
+                        "source": "github_advisory",
+                        "advisory_id": "GHSA-test-1234-5678",
+                        "aliases": ["CVE-2026-12345"],
+                        "summary": "Sentinel handling can bypass validation",
+                        "vulnerable_functions": ["normalize_index"],
+                        "source_url": (
+                            "https://github.com/advisories/GHSA-test-1234-5678"
+                        ),
+                    }
+                ],
+            )
+        if name == "cisa_kev_lookup":
+            return ToolResult(
+                name=name,
+                output=[
+                    {
+                        "cve_id": "CVE-2026-12345",
+                        "vendor_project": "Example",
+                        "product": "Parser",
+                        "vulnerability_name": "Sentinel Validation Bypass",
+                        "short_description": "A crafted index bypasses validation.",
+                    }
+                ],
+            )
+        return self.delegate.run(request)
+
+
+class FailingAdvisoryRunner(RecordingRunner):
+    def run(self, request: ToolRequest) -> ToolResult:
+        self.requests.append(request)
+        name = request.allowed_tools[0]
+        if name in {"github_advisory_search", "cisa_kev_lookup", "osv_query"}:
+            return ToolResult(name=name, error="network unavailable")
+        return self.delegate.run(request)
+
+
 class NeverRunner:
     def run(self, request: ToolRequest) -> ToolResult:
         raise AssertionError(f"unexpected tool request: {request}")
+
+
+def _write_candidate_source(tmp_path) -> None:
+    (tmp_path / "target.py").write_text(
+        "def normalize_index(index, length):\n"
+        "    if index == -1:\n"
+        "        return length - 1\n"
+        "    return index\n\n"
+        "def use_index(index, values):\n"
+        "    return values[index]\n",
+        encoding="utf-8",
+    )
 
 
 def test_variant_analysis_requires_authorization(tmp_path):
@@ -109,16 +167,7 @@ def test_variant_analysis_requires_authorization(tmp_path):
 
 
 def test_variant_analysis_creates_only_awaiting_verification_candidate(tmp_path):
-    source = tmp_path / "target.py"
-    source.write_text(
-        "def normalize_index(index, length):\n"
-        "    if index == -1:\n"
-        "        return length - 1\n"
-        "    return index\n\n"
-        "def use_index(index, values):\n"
-        "    return values[index]\n",
-        encoding="utf-8",
-    )
+    _write_candidate_source(tmp_path)
     runner = RecordingRunner(ToolAgent(_registry()))
     request = VariantAnalysisRequest(
         source_path=str(tmp_path),
@@ -153,6 +202,57 @@ def test_variant_analysis_creates_only_awaiting_verification_candidate(tmp_path)
     assert all(
         request.arguments == request.locked_arguments for request in runner.requests
     )
+
+
+def test_advisory_seed_is_enriched_and_passed_to_smart_agent(tmp_path):
+    _write_candidate_source(tmp_path)
+    runner = AdvisoryRunner(ToolAgent(_registry()))
+    captured = {}
+
+    def generator(request, source_files, diff_summary, known_bugs):
+        captured["known_bugs"] = known_bugs
+        return _analysis_generator(request, source_files, diff_summary, known_bugs)
+
+    result = run_variant_analysis(
+        VariantAnalysisRequest(
+            source_path=str(tmp_path),
+            authorized=True,
+            seed_cve_ids=["CVE-2026-12345"],
+        ),
+        tool_runner=runner,
+        analysis_generator=generator,
+    )
+
+    assert result.status == "completed"
+    assert result.research_errors == []
+    assert len(result.known_bugs) == 1
+    assert result.known_bugs[0].advisory_id == "GHSA-test-1234-5678"
+    assert result.known_bugs[0].exploited_in_wild is True
+    assert result.known_bugs[0].kev_details["product"] == "Parser"
+    assert captured["known_bugs"] == result.known_bugs
+    tool_names = [request.allowed_tools[0] for request in runner.requests]
+    assert "github_advisory_search" in tool_names
+    assert "cisa_kev_lookup" in tool_names
+
+
+def test_advisory_failure_degrades_to_local_seed_context(tmp_path):
+    _write_candidate_source(tmp_path)
+    runner = FailingAdvisoryRunner(ToolAgent(_registry()))
+
+    result = run_variant_analysis(
+        VariantAnalysisRequest(
+            source_path=str(tmp_path),
+            authorized=True,
+            seed_cve_ids=["CVE-2026-12345"],
+        ),
+        tool_runner=runner,
+        analysis_generator=_analysis_generator,
+    )
+
+    assert result.status == "completed"
+    assert result.known_bugs == []
+    assert len(result.research_errors) == 2
+    assert all("network unavailable" in error for error in result.research_errors)
 
 
 def test_static_search_without_matches_stays_inconclusive(tmp_path):
@@ -294,6 +394,32 @@ def test_promotion_requires_positive_and_control_reproduction():
         "runtime-positive",
         "runtime-control",
     ]
+
+
+def test_variant_request_accepts_advisory_or_package_seed(tmp_path):
+    cve_request = VariantAnalysisRequest(
+        source_path=str(tmp_path),
+        authorized=True,
+        seed_cve_ids=["CVE-2026-12345"],
+    )
+    package_request = VariantAnalysisRequest(
+        source_path=str(tmp_path),
+        authorized=True,
+        seed_package_name="demo-parser",
+        seed_package_ecosystem="PyPI",
+    )
+
+    assert cve_request.seed_cve_ids == ["CVE-2026-12345"]
+    assert package_request.seed_package_name == "demo-parser"
+
+
+def test_variant_request_rejects_partial_package_seed(tmp_path):
+    with pytest.raises(ValidationError, match="supplied together"):
+        VariantAnalysisRequest(
+            source_path=str(tmp_path),
+            authorized=True,
+            seed_package_name="demo-parser",
+        )
 
 
 def test_variant_request_requires_a_concrete_seed(tmp_path):
