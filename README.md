@@ -69,6 +69,7 @@ Two models. Hard role separation.
 - Ruby **3.3.8** for Metasploit validation
 - An OpenRouter, OpenAI, or Anthropic API key
 - Optional Brave Search or Tavily API key for public web research
+- Optional Chromium, Playwright, and markdownify for JS-rendered research pages
 
 ```bash
 git clone https://github.com/lost-rob0t/zero-forge.git
@@ -96,6 +97,15 @@ export BRAVE_SEARCH_API_KEY='...'
 # or
 export TAVILY_API_KEY='...'
 ```
+
+Enable the optional rendered-page fallback:
+
+```bash
+uv pip install -r requirements-browser.txt
+uv run playwright install chromium
+```
+
+Static HTTP retrieval remains the default. ZeroForge escalates an HTML page to Chromium when the static response is truncated, contains a JavaScript-required shell, or yields too little readable content. Chromium loads the page directly, performs a bounded number of scroll steps, extracts the rendered DOM, converts it with `markdownify`, and passes ordered Markdown chunks to the Smart Agent.
 
 Generate a Metasploit module:
 
@@ -174,8 +184,12 @@ output/<investigation-id>/
 └── research/
     ├── web-results.md|org|json
     ├── fetched-pages.md|org|json
+    ├── pages/
+    │   └── page-XX.md
     └── errors.md|org|json
 ```
+
+Rendered and static page bodies are stored as standalone Markdown files beneath `research/pages/`. The structured fetched-page report records metadata and the corresponding relative Markdown path.
 
 Failed or exhausted sessions remain in `/tmp/zeroforge` for inspection. The drafting loop validates artifacts but does not execute them or confirm findings.
 
@@ -232,7 +246,7 @@ ZeroForge is built to fail closed:
 - malformed or disallowed Tool Agent calls are rejected and repaired within budget;
 - artifact examples are selected by type and bounded by count and total size;
 - oversized examples are skipped instead of silently truncated;
-- web searches and page fetches have provider, query, domain, address, size, count, and timeout bounds;
+- web searches and static page fetches have provider, query, domain, address, size, count, and timeout bounds;
 - incomplete exploit drafts remain beneath `/tmp/zeroforge` with private permissions;
 - only validator-clean sessions are moved into the configured output tree;
 - missing Ruby blocks Metasploit validation;
