@@ -159,7 +159,7 @@ def test_static_search_without_matches_stays_inconclusive(tmp_path):
         "def safe_lookup(index, values):\n"
         "    if index < 0 or index >= len(values):\n"
         "        raise IndexError(index)\n"
-        "    return values[index]\n",
+        "    return values.__getitem__(index)\n",
         encoding="utf-8",
     )
 
