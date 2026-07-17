@@ -184,8 +184,12 @@ output/<investigation-id>/
 └── research/
     ├── web-results.md|org|json
     ├── fetched-pages.md|org|json
+    ├── pages/
+    │   └── page-XX.md
     └── errors.md|org|json
 ```
+
+Rendered and static page bodies are stored as standalone Markdown files beneath `research/pages/`. The structured fetched-page report records metadata and the corresponding relative Markdown path.
 
 Failed or exhausted sessions remain in `/tmp/zeroforge` for inspection. The drafting loop validates artifacts but does not execute them or confirm findings.
 
