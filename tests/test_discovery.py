@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 """Tests for the seeded, specification-first discovery workflow."""
 
 from __future__ import annotations
