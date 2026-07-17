@@ -41,6 +41,7 @@ def test_default_registry():
     assert "cisa_kev_lookup" in names
     assert "web_search" in names
     assert "fetch_web_page" in names
+    assert "fetch_rendered_web_page" in names
     assert "prepare_exploit_workspace" in names
     assert "write_exploit_draft" in names
     assert "validate_exploit_draft" in names
