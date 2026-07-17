@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 """Tests for bounded rendered-page Markdown retrieval."""
 
 from types import SimpleNamespace
