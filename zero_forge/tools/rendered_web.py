@@ -7,7 +7,7 @@ import re
 import urllib.parse
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from .web_research import _USER_AGENT, _bounded_timeout, _validate_public_https_url
 
@@ -40,7 +40,7 @@ def _load_markdown_converter() -> Callable[..., str]:
         raise RenderedWebDependencyError(
             "rendered web research requires markdownify; install requirements-browser.txt"
         ) from exc
-    return markdownify
+    return cast(Callable[..., str], markdownify)
 
 
 def _load_playwright() -> Callable[..., Any]:
@@ -51,7 +51,7 @@ def _load_playwright() -> Callable[..., Any]:
             "rendered web research requires Playwright; install requirements-browser.txt "
             "and run 'playwright install chromium'"
         ) from exc
-    return sync_playwright
+    return cast(Callable[..., Any], sync_playwright)
 
 
 def _browser_request_allowed(url: str, resource_type: str) -> bool:
