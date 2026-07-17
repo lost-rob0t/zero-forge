@@ -105,7 +105,7 @@ uv pip install -r requirements-browser.txt
 uv run playwright install chromium
 ```
 
-Static HTTP retrieval remains the default. ZeroForge escalates an HTML page to the bounded Chromium tool when the static response is truncated, contains a JavaScript-required shell, or yields too little readable content. The browser performs bounded scrolling for lazy-loaded content, extracts the rendered semantic DOM, converts it with `markdownify`, and passes ordered Markdown chunks to the Smart Agent.
+Static HTTP retrieval remains the default. ZeroForge escalates an HTML page to Chromium when the static response is truncated, contains a JavaScript-required shell, or yields too little readable content. Chromium loads the page directly, performs a bounded number of scroll steps, extracts the rendered DOM, converts it with `markdownify`, and passes ordered Markdown chunks to the Smart Agent.
 
 Generate a Metasploit module:
 
@@ -246,8 +246,7 @@ ZeroForge is built to fail closed:
 - malformed or disallowed Tool Agent calls are rejected and repaired within budget;
 - artifact examples are selected by type and bounded by count and total size;
 - oversized examples are skipped instead of silently truncated;
-- web searches and page fetches have provider, query, domain, address, size, count, and timeout bounds;
-- browser-rendered research blocks private/non-HTTPS subresources, downloads, heavy media, popups, and persistent service workers;
+- web searches and static page fetches have provider, query, domain, address, size, count, and timeout bounds;
 - incomplete exploit drafts remain beneath `/tmp/zeroforge` with private permissions;
 - only validator-clean sessions are moved into the configured output tree;
 - missing Ruby blocks Metasploit validation;
