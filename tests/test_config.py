@@ -238,3 +238,62 @@ def test_yaml_auto_max_tokens(tmp_path, clean_env):
 def test_default_config_paths_exist():
     assert isinstance(DEFAULT_CONFIG_PATHS, list)
     assert DEFAULT_CONFIG_PATHS
+
+
+# --- .env file loading tests (issue #109) --------------------------------
+
+
+def test_load_env_file_populates_os_environ(tmp_path, monkeypatch):
+    """_load_env_file loads KEY=value pairs from .env into os.environ."""
+    from zero_forge.cli import _load_env_file
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("TEST_ENV_VAR=hello_from_dotenv\n")
+
+    monkeypatch.setenv("ZERO_FORGE_ENV_FILE", str(env_file))
+    monkeypatch.delenv("TEST_ENV_VAR", raising=False)
+
+    _load_env_file()
+
+    import os
+    assert os.environ.get("TEST_ENV_VAR") == "hello_from_dotenv"
+
+
+def test_load_env_file_handles_export_prefix(tmp_path, monkeypatch):
+    """_load_env_file handles 'export KEY=value' syntax."""
+    from zero_forge.cli import _load_env_file
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("export TEST_EXPORT_VAR=exported_value\n")
+
+    monkeypatch.setenv("ZERO_FORGE_ENV_FILE", str(env_file))
+    monkeypatch.delenv("TEST_EXPORT_VAR", raising=False)
+
+    _load_env_file()
+
+    import os
+    assert os.environ.get("TEST_EXPORT_VAR") == "exported_value"
+
+
+def test_load_env_file_does_not_override_existing(tmp_path, monkeypatch):
+    """_load_env_file does not override existing env vars."""
+    from zero_forge.cli import _load_env_file
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("EXISTING_VAR=from_file\n")
+
+    monkeypatch.setenv("ZERO_FORGE_ENV_FILE", str(env_file))
+    monkeypatch.setenv("EXISTING_VAR", "from_shell")
+
+    _load_env_file()
+
+    import os
+    assert os.environ.get("EXISTING_VAR") == "from_shell"
+
+
+def test_load_env_file_missing_file_is_silent(tmp_path, monkeypatch):
+    """Missing .env file does not raise."""
+    from zero_forge.cli import _load_env_file
+
+    monkeypatch.setenv("ZERO_FORGE_ENV_FILE", str(tmp_path / "nonexistent.env"))
+    _load_env_file()  # should not raise
