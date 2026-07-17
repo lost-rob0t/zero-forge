@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -21,6 +22,7 @@ from .llm import (
     LLMProviderError,
     LLMResponseError,
     call_model,
+    call_model_async,
     resolve_model,
 )
 
@@ -455,6 +457,89 @@ def repair_artifact(
         logger.warning("Repair produced empty code block; returning original artifact")
         return artifact
     cfg = get_settings()
+    new_metadata = {**artifact.metadata, "repaired": True}
+    if cfg.llm.stub_mode:
+        new_metadata["stub"] = True
+    return Artifact(
+        artifact_type=artifact.artifact_type,
+        content=code,
+        filename=artifact.filename,
+        metadata=new_metadata,
+    )
+
+
+# --- Async variants (issue #83) -----------------------------------------
+
+async def generate_artifact_async(
+    vuln_input: VulnerabilityInput,
+    context: CollectedContext,
+    *,
+    on_chunk: Callable[[str], None] | None = None,
+) -> Artifact:
+    """Async variant of generate_artifact with optional streaming callback."""
+    artifact_type = vuln_input.artifact_type
+    logger.info("Generating artifact (async) for CVE %s", context.cve_id)
+    prompt = _build_context_prompt(vuln_input, context)
+    cfg = get_settings()
+    if cfg.llm.stub_mode:
+        raw = _stub_artifact(artifact_type)
+    else:
+        raw = await call_model_async(
+            "smart", cfg.models.smart,
+            _system_prompt(artifact_type), prompt,
+            on_chunk=on_chunk,
+        )
+    code = _extract_code_block(raw, artifact_type)
+    code = _check_refusal(code, "generation")
+    return Artifact(
+        artifact_type=artifact_type,
+        content=code,
+        filename=_artifact_filename(context.cve_id, artifact_type),
+        metadata={
+            "model": cfg.models.smart.model,
+            "model_role": "smart",
+            "cve_id": context.cve_id,
+            "artifact_type": artifact_type.value,
+            "stub": cfg.llm.stub_mode,
+        },
+    )
+
+
+async def repair_artifact_async(
+    artifact: Artifact,
+    validation: ValidationResult,
+    context: CollectedContext,
+    *,
+    attempt: int = 0,
+    max_attempts: int = 0,
+    on_chunk: Callable[[str], None] | None = None,
+) -> Artifact:
+    """Async variant of repair_artifact with optional streaming callback."""
+    logger.info(
+        "Repairing artifact (async) (%d validation errors, attempt %d/%d)",
+        len(validation.errors),
+        attempt,
+        max_attempts,
+    )
+    prompt = _build_repair_prompt(
+        artifact, validation, attempt=attempt, max_attempts=max_attempts
+    )
+    cfg = get_settings()
+    if cfg.llm.stub_mode:
+        raw = _stub_artifact(artifact.artifact_type)
+    else:
+        raw = await call_model_async(
+            "smart", cfg.models.smart,
+            _system_prompt(artifact.artifact_type), prompt,
+            on_chunk=on_chunk,
+        )
+    code = _extract_code_block(raw, artifact.artifact_type)
+    if _is_refusal(code):
+        _check_refusal(code, "repair")
+        return artifact
+    if not code.strip():
+        logger.warning("Repair produced empty code block; returning original artifact")
+        return artifact
     new_metadata = {**artifact.metadata, "repaired": True}
     if cfg.llm.stub_mode:
         new_metadata["stub"] = True

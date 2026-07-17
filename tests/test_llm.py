@@ -343,3 +343,113 @@ def test_call_model_default_max_attempts_is_three(clean_env, monkeypatch):
 
     sig = inspect.signature(_cm)
     assert sig.parameters["max_attempts"].default == 3
+
+
+
+# --- Async tests (issue #83) ---------------------------------------------
+
+import asyncio  # noqa: E402
+
+
+def test_call_model_async_returns_content(clean_env, monkeypatch):
+    """call_model_async returns content from litellm.acompletion."""
+    from zero_forge.agents.llm import call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    async def fake_acompletion(**kwargs):
+        return _FakeResponse("hello async world")
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        result = asyncio.run(call_model_async("smart", config, "sys", "user"))
+
+    assert result == "hello async world"
+
+
+def test_call_model_async_streaming_with_on_chunk(clean_env, monkeypatch):
+    """call_model_async with on_chunk streams chunks."""
+    from zero_forge.agents.llm import call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    chunks_received = []
+
+    class _FakeChunk:
+        def __init__(self, content):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": content})(),
+            })()]
+
+    async def fake_acompletion(**kwargs):
+        assert kwargs.get("stream") is True
+        async def _gen():
+            for c in ("Hello", " ", "World"):
+                yield _FakeChunk(c)
+        return _gen()
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        result = asyncio.run(call_model_async(
+            "smart", config, "sys", "user",
+            on_chunk=chunks_received.append,
+        ))
+
+    assert result == "Hello World"
+    assert chunks_received == ["Hello", " ", "World"]
+
+
+def test_call_model_async_raises_on_no_api_key(clean_env, monkeypatch):
+    """call_model_async raises LLMConfigurationError without API key."""
+    from zero_forge.agents.llm import LLMConfigurationError, call_model_async
+
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    with pytest.raises(LLMConfigurationError, match="No API key"):
+        asyncio.run(call_model_async("smart", config, "sys", "user"))
+
+
+def test_call_model_async_raises_on_provider_error(clean_env, monkeypatch):
+    """call_model_async raises LLMProviderError on request failure."""
+    from zero_forge.agents.llm import LLMProviderError, call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    async def fake_acompletion(**kwargs):
+        raise Exception("connection timeout")
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        with pytest.raises(LLMProviderError, match="LLM async request failed"):
+            asyncio.run(call_model_async("smart", config, "sys", "user"))
+
+
+def test_stream_model_yields_chunks(clean_env, monkeypatch):
+    """stream_model async generator yields text chunks."""
+    from zero_forge.agents.llm import stream_model
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    class _FakeChunk:
+        def __init__(self, content):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": content})(),
+            })()]
+
+    async def fake_acompletion(**kwargs):
+        assert kwargs.get("stream") is True
+        async def _gen():
+            for c in ("chunk1", "chunk2", "chunk3"):
+                yield _FakeChunk(c)
+        return _gen()
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        async def _collect():
+            chunks = []
+            async for c in stream_model("smart", config, "sys", "user"):
+                chunks.append(c)
+            return chunks
+        result = asyncio.run(_collect())
+
+    assert result == ["chunk1", "chunk2", "chunk3"]
