@@ -44,6 +44,7 @@ def test_default_registry():
     assert "prepare_exploit_workspace" in names
     assert "write_exploit_draft" in names
     assert "validate_exploit_draft" in names
+    assert "publish_exploit_bundle" in names
     assert "read_source_files" in names
     assert "search_code" in names
     assert "git_diff_inspect" in names
