@@ -43,6 +43,7 @@ class ToolRegistry:
 
 def create_default_registry() -> ToolRegistry:
     """Create and populate a registry with the default built-in tools."""
+    from .advisory_lookup import cisa_kev_lookup, github_advisory_search, osv_query
     from .cve_lookup import cve_lookup
     from .source_inspect import git_diff_inspect, read_source_files, search_code
     from .validator import (
@@ -53,6 +54,9 @@ def create_default_registry() -> ToolRegistry:
 
     reg = ToolRegistry()
     reg.register("cve_lookup", cve_lookup)
+    reg.register("osv_query", osv_query)
+    reg.register("github_advisory_search", github_advisory_search)
+    reg.register("cisa_kev_lookup", cisa_kev_lookup)
     reg.register("read_source_files", read_source_files)
     reg.register("search_code", search_code)
     reg.register("git_diff_inspect", git_diff_inspect)
