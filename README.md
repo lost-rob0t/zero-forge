@@ -97,8 +97,6 @@ export BRAVE_SEARCH_API_KEY='...'
 export TAVILY_API_KEY='...'
 ```
 
-Search credentials are read directly by the web tool. They are not exposed to the Tool Agent or included in model prompts.
-
 Generate a Metasploit module:
 
 ```bash
@@ -135,16 +133,64 @@ uv run zero-forge validate active-rule.js --type zap_active_scan
 uv run zero-forge validate passive-rule.js --type zap_passive_scan
 ```
 
-## Seeded discovery API
+## Seeded discovery and iterative drafting
 
-The discovery package provides two separate bounded APIs:
+`run_variant_analysis()` derives threat models, falsifiable hypotheses, and static candidates. The `draft` command consumes a candidate and hypothesis, optionally searches the web, iteratively repairs an artifact in `/tmp`, then publishes only a validator-clean investigation.
 
-- `run_variant_analysis()` derives threat models, falsifiable hypotheses, and static candidates.
-- `run_exploit_iteration()` optionally searches the public web, creates a private workspace beneath `/tmp/zeroforge`, and repeatedly drafts and validates an exploit artifact using validator feedback.
+```bash
+uv run zero-forge draft \
+  --candidate candidate.json \
+  --hypothesis hypothesis.json \
+  --type python \
+  --source /path/to/source \
+  --web-query 'vendor advisory fixing commit' \
+  --format markdown \
+  --format org \
+  --authorized
+```
 
-The iterative drafting loop does not execute the generated artifact and cannot confirm a finding. See [`docs/discovery.md`](docs/discovery.md) for the workflow, web-source policy, temp-workspace boundary, and remaining runtime-verification work.
+Output format controls:
+
+- no format flags: Markdown and Org;
+- repeat `--format markdown`, `--format org`, or `--format json` for selected formats;
+- `--all-formats` emits Markdown, Org, and JSON;
+- JSON is opt-in unless `--all-formats` is used.
+
+Completed investigations are moved from `/tmp` into the configured output directory:
+
+```text
+output/<investigation-id>/
+├── findings/
+│   ├── hypothesis.md|org|json
+│   ├── candidate.md|org|json
+│   └── result.md|org|json
+├── evidence/
+│   └── validation/
+│       └── iteration-XX.md|org|json
+├── poc/
+│   ├── <final-artifact>
+│   └── iterations/
+│       └── iteration-XX.<ext>
+└── research/
+    ├── web-results.md|org|json
+    ├── fetched-pages.md|org|json
+    └── errors.md|org|json
+```
+
+Failed or exhausted sessions remain in `/tmp/zeroforge` for inspection. The drafting loop validates artifacts but does not execute them or confirm findings.
 
 ## Configuration
+
+ZeroForge searches for a config file in the following order, using the first match:
+
+1. A path passed with `--config /path/to/config.yaml`
+2. `ZERO_FORGE_CONFIG_PATH` environment variable
+3. `./zeroforge.yaml` (current directory)
+4. `./zeroforge.yml`
+5. `$XDG_CONFIG_HOME/zeroforge/config.yaml`
+6. `$XDG_CONFIG_HOME/zeroforge/config.yml` (falls back to `~/.config` when `XDG_CONFIG_HOME` is unset or empty)
+
+If no config file exists in any of these locations, the CLI automatically writes a default `config.yaml` to the XDG config directory and prints a message telling you to edit it. This happens only when no `--config` flag is passed.
 
 Smart and Tool roles are configured independently. Do not point both roles at one model and pretend they are separate agents.
 
@@ -177,8 +223,7 @@ export ZERO_FORGE_TOOL_MODEL=openai/gpt-4o-mini
 export ZERO_FORGE_MAX_REPAIR_ATTEMPTS=3
 ```
 
-API keys are read from environment variables. They are not loaded from YAML.
-A `.env` file in the working directory is loaded before settings resolution; existing shell variables take precedence over `.env` values. Use `ZERO_FORGE_ENV_FILE` to specify a custom `.env` path.
+API keys are read from environment variables. They are not loaded from YAML. A `.env` file in the working directory is loaded before settings resolution; existing shell variables take precedence over `.env` values. Use `ZERO_FORGE_ENV_FILE` to specify a custom `.env` path.
 
 ## Failure is a result
 
@@ -188,7 +233,8 @@ ZeroForge is built to fail closed:
 - artifact examples are selected by type and bounded by count and total size;
 - oversized examples are skipped instead of silently truncated;
 - web searches and page fetches have provider, query, domain, address, size, count, and timeout bounds;
-- exploit drafts remain beneath `/tmp/zeroforge`, use private permissions, and are never executed by the drafting loop;
+- incomplete exploit drafts remain beneath `/tmp/zeroforge` with private permissions;
+- only validator-clean sessions are moved into the configured output tree;
 - missing Ruby blocks Metasploit validation;
 - passive ZAP rules fail when they attempt active behavior;
 - stub mode never produces a successful artifact.
@@ -199,7 +245,7 @@ ZeroForge is built to fail closed:
 zero_forge/
 ├── agents/          smart and tool role implementations
 ├── discovery/       seeded analysis and iterative exploit drafting
-├── tools/           allowlisted research, workspace, and validation tools
+├── tools/           allowlisted research, workspace, publishing, and validation tools
 ├── llm_examples/    bounded Metasploit and ZAP references
 ├── workflow.py      LangGraph orchestration and repair loop
 ├── schemas.py       typed state, input, and artifact contracts
