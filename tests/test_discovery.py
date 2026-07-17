@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-
 from zero_forge.agents.tool_agent import ToolAgent
 from zero_forge.discovery.schemas import (
     CandidateFinding,
