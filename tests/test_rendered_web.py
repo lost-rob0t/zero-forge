@@ -4,14 +4,13 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-
 from zero_forge.tools.rendered_web import (
-    _TransferBudget,
     _browser_request_allowed,
     _chromium_args,
     _chunk_markdown,
     _redirect_depth,
     _resolve_public_addresses,
+    _TransferBudget,
     fetch_rendered_web_page,
 )
 
