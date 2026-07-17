@@ -167,6 +167,10 @@ def generate(
     New artifact types can be added by extending the ArtifactType enum,
     registering an ArtifactProfile, a validator, and example files.
     """
+    # Load .env first so ZERO_FORGE_CONFIG_PATH from .env is visible to
+    # ensure_default_config() and the config discovery logic.
+    _load_env_file()
+
     if not config_file:
         new_config = ensure_default_config()
         if new_config is not None:
@@ -174,6 +178,7 @@ def generate(
                 f"[yellow]Created default config at {new_config}.[/]\n"
                 "[yellow]Edit it to configure your models and API keys, then re-run.[/]"
             )
+            raise typer.Exit()
 
     _apply_env_overrides(output_dir=output_dir, unsafe=unsafe, config_file=config_file)
     setup_logging_from_settings()

@@ -401,6 +401,75 @@ def test_ensure_default_config_falls_back_to_home(tmp_path, monkeypatch, clean_e
     assert result.exists()
 
 
+def test_user_config_paths_rejects_relative_xdg(monkeypatch):
+    """Relative XDG_CONFIG_HOME is ignored; falls back to ~/.config."""
+    from zero_forge.config import _user_config_paths
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", "relative/path")
+
+    paths = _user_config_paths()
+    expected_dir = Path.home() / ".config" / "zeroforge"
+    assert paths[0] == str(expected_dir / "config.yaml")
+    assert paths[1] == str(expected_dir / "config.yml")
+
+
+def test_ensure_default_config_respects_env_config_path(tmp_path, monkeypatch, clean_env):
+    """ensure_default_config returns None when ZERO_FORGE_CONFIG_PATH points to existing file."""
+    from zero_forge.config import ensure_default_config
+
+    custom_config = tmp_path / "custom.yaml"
+    custom_config.write_text(yaml.dump({"models": {"smart": {"model": "custom"}}}))
+
+    monkeypatch.setenv("ZERO_FORGE_CONFIG_PATH", str(custom_config))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.chdir(tmp_path)
+
+    result = ensure_default_config()
+    assert result is None
+
+
+def test_ensure_default_config_creates_dir_with_mode_0700(tmp_path, monkeypatch, clean_env):
+    """XDG config directory is created with mode 0700 per XDG spec."""
+    import stat
+
+    from zero_forge.config import ensure_default_config
+
+    xdg_dir = tmp_path / "xdg"
+    xdg_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+
+    result = ensure_default_config()
+    assert result is not None
+
+    app_dir = xdg_dir / "zeroforge"
+    mode = stat.S_IMODE(app_dir.stat().st_mode)
+    assert mode == 0o700
+
+
+def test_generate_exits_after_creating_default_config(tmp_path, monkeypatch, clean_env):
+    """CLI generate exits after writing default config; run_workflow is not called."""
+    from typer.testing import CliRunner
+
+    from zero_forge.cli import app
+
+    xdg_dir = tmp_path / "xdg"
+    xdg_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ZERO_FORGE_CONFIG_PATH", raising=False)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["generate", "--cve", "CVE-2021-44228"])
+
+    assert result.exit_code == 0
+    assert "Created default config" in result.stdout
+    assert (xdg_dir / "zeroforge" / "config.yaml").exists()
+
+    # Verify run_workflow was not called — no workflow output should exist
+    assert "generating artifact" not in result.stdout.lower()
+
+
 # --- .env file loading tests (issue #109) --------------------------------
 
 

@@ -210,11 +210,14 @@ def _apply_env_overrides(settings: Settings) -> Settings:
 def _user_config_paths() -> list[str]:
     """Return XDG-aware config file paths under the user config directory.
 
-    Respects XDG_CONFIG_HOME; falls back to ~/.config when unset or empty.
+    Respects XDG_CONFIG_HOME when set to an absolute path; falls back to
+    ~/.config when unset, empty, or relative (per the XDG Base Directory
+    Specification, relative values are invalid and must be ignored).
     """
     xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "")
-    if xdg_config_home:
-        config_dir = Path(xdg_config_home).expanduser()
+    candidate = Path(xdg_config_home).expanduser() if xdg_config_home else None
+    if candidate is not None and candidate.is_absolute():
+        config_dir = candidate
     else:
         config_dir = Path.home() / ".config"
     app_dir = config_dir / "zeroforge"
@@ -281,20 +284,31 @@ def ensure_default_config() -> Path | None:
     """Write a default config to the XDG path if no config exists.
 
     Returns the path to the newly written file, or None if a config
-    already exists in any search location.
+    already exists in any search location (including ZERO_FORGE_CONFIG_PATH).
     """
+    # Respect ZERO_FORGE_CONFIG_PATH — if it points to an existing file,
+    # the user already has a config and we should not write a new one.
+    env_path = os.environ.get("ZERO_FORGE_CONFIG_PATH")
+    if env_path and Path(env_path).expanduser().exists():
+        return None
+
     search_paths = ["./zeroforge.yaml", "./zeroforge.yml", *_user_config_paths()]
     for candidate in search_paths:
         if Path(candidate).expanduser().exists():
             return None
 
+    # Use the same XDG resolution as _user_config_paths() for the target dir.
     xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "")
-    if xdg_config_home:
-        config_dir = Path(xdg_config_home).expanduser()
+    candidate_dir = Path(xdg_config_home).expanduser() if xdg_config_home else None
+    if candidate_dir is not None and candidate_dir.is_absolute():
+        config_dir = candidate_dir
     else:
         config_dir = Path.home() / ".config"
     app_dir = config_dir / "zeroforge"
-    app_dir.mkdir(parents=True, exist_ok=True)
+    # XDG spec: newly created config dirs should have mode 0700.
+    app_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Respect the mode even if the directory already existed with broader perms.
+    os.chmod(app_dir, 0o700)
     config_path = app_dir / "config.yaml"
     config_path.write_text(DEFAULT_CONFIG_TEMPLATE, encoding="utf-8")
     return config_path
