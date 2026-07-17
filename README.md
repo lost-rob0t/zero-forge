@@ -82,6 +82,12 @@ Set a provider key:
 export OPENROUTER_API_KEY='sk-or-...'
 ```
 
+ZeroForge automatically loads a `.env` file from the working directory before resolving settings. Shell variables always take precedence over `.env` values. To use a custom path:
+
+```bash
+export ZERO_FORGE_ENV_FILE=/path/to/.env
+```
+
 Generate a Metasploit module:
 
 ```bash
@@ -152,6 +158,7 @@ export ZERO_FORGE_MAX_REPAIR_ATTEMPTS=3
 ```
 
 API keys are read from environment variables. They are not loaded from YAML.
+A `.env` file in the working directory is loaded before settings resolution; existing shell variables take precedence over `.env` values. Use `ZERO_FORGE_ENV_FILE` to specify a custom `.env` path.
 
 ## Failure is a result
 

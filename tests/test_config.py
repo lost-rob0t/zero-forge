@@ -238,3 +238,85 @@ def test_yaml_auto_max_tokens(tmp_path, clean_env):
 def test_default_config_paths_exist():
     assert isinstance(DEFAULT_CONFIG_PATHS, list)
     assert DEFAULT_CONFIG_PATHS
+
+
+# --- .env file loading tests (issue #109) --------------------------------
+
+
+def test_load_env_file_populates_os_environ(tmp_path, monkeypatch):
+    """_load_env_file loads KEY=value pairs from .env into os.environ."""
+    from zero_forge.cli import _load_env_file
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("TEST_ENV_VAR=hello_from_dotenv\n")
+
+    monkeypatch.setenv("ZERO_FORGE_ENV_FILE", str(env_file))
+    monkeypatch.delenv("TEST_ENV_VAR", raising=False)
+
+    _load_env_file()
+
+    import os
+    assert os.environ.get("TEST_ENV_VAR") == "hello_from_dotenv"
+
+
+def test_load_env_file_handles_export_prefix(tmp_path, monkeypatch):
+    """_load_env_file handles 'export KEY=value' syntax."""
+    from zero_forge.cli import _load_env_file
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("export TEST_EXPORT_VAR=exported_value\n")
+
+    monkeypatch.setenv("ZERO_FORGE_ENV_FILE", str(env_file))
+    monkeypatch.delenv("TEST_EXPORT_VAR", raising=False)
+
+    _load_env_file()
+
+    import os
+    assert os.environ.get("TEST_EXPORT_VAR") == "exported_value"
+
+
+def test_load_env_file_does_not_override_existing(tmp_path, monkeypatch):
+    """_load_env_file does not override existing env vars."""
+    from zero_forge.cli import _load_env_file
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("EXISTING_VAR=from_file\n")
+
+    monkeypatch.setenv("ZERO_FORGE_ENV_FILE", str(env_file))
+    monkeypatch.setenv("EXISTING_VAR", "from_shell")
+
+    _load_env_file()
+
+    import os
+    assert os.environ.get("EXISTING_VAR") == "from_shell"
+
+
+def test_load_env_file_missing_file_is_silent(tmp_path, monkeypatch):
+    """Missing .env file does not raise."""
+    from zero_forge.cli import _load_env_file
+
+    monkeypatch.setenv("ZERO_FORGE_ENV_FILE", str(tmp_path / "nonexistent.env"))
+    _load_env_file()  # should not raise
+
+
+def test_env_file_api_key_reaches_settings(tmp_path, monkeypatch, request):
+    """API key loaded from default .env reaches get_settings() (#109)."""
+    import os
+
+    from zero_forge.cli import _apply_env_overrides
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENROUTER_API_KEY=sk-or-from-dotenv\n")
+
+    monkeypatch.delenv("ZERO_FORGE_ENV_FILE", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    # _load_env_file mutates os.environ directly, bypassing monkeypatch;
+    # clean up the leaked key so downstream tests are not polluted.
+    request.addfinalizer(lambda: os.environ.pop("OPENROUTER_API_KEY", None))
+
+    monkeypatch.chdir(tmp_path)
+    _apply_env_overrides(output_dir="", unsafe=False, config_file="")
+
+    settings = get_settings()
+    assert settings.openrouter_api_key == "sk-or-from-dotenv"

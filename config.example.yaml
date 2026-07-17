@@ -1,6 +1,9 @@
 # ZeroForge configuration example
 # Copy to zeroforge.yaml and edit as needed.
-# API keys are environment-only:
+# API keys are environment-only.  A .env file in the working directory is
+# loaded automatically before settings resolution; shell variables take
+# precedence over .env values.  Use ZERO_FORGE_ENV_FILE for a custom path:
+#   export ZERO_FORGE_ENV_FILE=/path/to/.env
 #   export OPENROUTER_API_KEY="sk-..."
 #   export OPENAI_API_KEY="sk-..."
 #   export ANTHROPIC_API_KEY="sk-..."

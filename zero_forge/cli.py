@@ -55,7 +55,30 @@ def _read(path: str) -> str:
     return Path(path).read_text(encoding="utf-8", errors="replace") if path else ""
 
 
+def _load_env_file() -> None:
+    """Load .env file before settings are read.
+
+    Supports ZERO_FORGE_ENV_FILE for a custom path. Handles both
+    KEY=value and export KEY=value syntax.
+    """
+    import os
+
+    from dotenv import dotenv_values
+
+    env_file = os.environ.get("ZERO_FORGE_ENV_FILE")
+    if env_file:
+        path = env_file
+    else:
+        path = ".env"
+
+    values = dotenv_values(path)
+    for key, value in values.items():
+        if key not in os.environ and value is not None:
+            os.environ[key] = value
+
+
 def _apply_env_overrides(*, output_dir: str, unsafe: bool, config_file: str) -> None:
+    _load_env_file()
     if config_file:
         import os
 
