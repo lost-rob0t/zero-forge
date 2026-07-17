@@ -43,11 +43,13 @@ The architecture is based on four current results:
   exploitation-in-the-wild annotation and prioritization signal.
 
 The dedicated exploit-drafting loop can additionally use bounded public web search through
-Brave Search or Tavily. Provider credentials are read directly from `BRAVE_SEARCH_API_KEY` or
-`TAVILY_API_KEY`; keys never enter Tool Agent arguments or model prompts. Search queries,
-result counts, domain filters, page count, response size, and timeouts are bounded. Selected
-pages are restricted to public HTTPS addresses, content types are allowlisted, and retrieved
-content is hashed with its final URL and retrieval time.
+[Brave Search](https://api.search.brave.com/app/documentation/web-search/get-started) or
+[Tavily](https://docs.tavily.com/documentation/api-reference/endpoint/search). Provider
+credentials are read directly from `BRAVE_SEARCH_API_KEY` or `TAVILY_API_KEY`; keys never enter
+Tool Agent arguments or model prompts. Search queries, result counts, domain filters, page
+count, response size, and timeouts are bounded. Selected pages are restricted to public HTTPS
+addresses, content types are allowlisted, and retrieved content is hashed with its final URL
+and retrieval time.
 
 Every network call is a fully locked Tool Agent request. The normalized advisory and web
 records retain source identity and references. Research data is context only: it cannot
