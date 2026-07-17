@@ -145,11 +145,53 @@ def _ensure_tree(workspace: Path) -> dict[str, Path]:
         "poc": workspace / "poc",
         "iterations": workspace / "poc" / "iterations",
         "research": workspace / "research",
+        "pages": workspace / "research" / "pages",
     }
     for path in paths.values():
         path.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(path, 0o700)
     return paths
+
+
+def _page_document(page: dict[str, Any], index: int) -> str:
+    title = str(page.get("title", "")).strip() or f"Research Page {index}"
+    final_url = str(page.get("final_url", page.get("url", ""))).strip()
+    rendered = bool(page.get("rendered", False))
+    truncated = bool(page.get("truncated", False))
+    content = str(page.get("markdown", page.get("text", ""))).strip()
+    header = [
+        f"# {title}",
+        "",
+        f"- Source: {final_url}",
+        f"- Rendered: {'true' if rendered else 'false'}",
+        f"- Truncated: {'true' if truncated else 'false'}",
+        "",
+        "---",
+        "",
+    ]
+    return "\n".join([*header, content, ""])
+
+
+def _write_research_pages(
+    directory: Path,
+    fetched_pages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    summaries: list[dict[str, Any]] = []
+    written: list[str] = []
+    for index, page in enumerate(fetched_pages, start=1):
+        filename = f"page-{index:02d}.md"
+        destination = directory / filename
+        destination.write_text(_page_document(page, index), encoding="utf-8")
+        os.chmod(destination, 0o600)
+        written.append(str(destination))
+        summary = {
+            key: value
+            for key, value in page.items()
+            if key not in {"markdown", "markdown_chunks", "text"}
+        }
+        summary["markdown_path"] = f"pages/{filename}"
+        summaries.append(summary)
+    return summaries, written
 
 
 def _move_tree(source: Path, destination: Path) -> None:
@@ -234,12 +276,14 @@ def publish_exploit_bundle(
             formats,
         )
     )
+    page_summaries, page_files = _write_research_pages(tree["pages"], fetched_pages)
+    written.extend(page_files)
     written.extend(
         _write_document(
             tree["research"],
             "fetched-pages",
             "Fetched Research Pages",
-            fetched_pages,
+            page_summaries,
             formats,
         )
     )
