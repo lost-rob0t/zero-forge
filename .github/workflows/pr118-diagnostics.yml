@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/discovery-specification-loop
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: read
