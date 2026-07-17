@@ -50,6 +50,7 @@ def create_default_registry() -> ToolRegistry:
         validate_exploit_draft,
         write_exploit_draft,
     )
+    from .output_bundle import publish_exploit_bundle
     from .source_inspect import git_diff_inspect, read_source_files, search_code
     from .validator import (
         validate_metasploit,
@@ -68,6 +69,7 @@ def create_default_registry() -> ToolRegistry:
     reg.register("prepare_exploit_workspace", prepare_exploit_workspace)
     reg.register("write_exploit_draft", write_exploit_draft)
     reg.register("validate_exploit_draft", validate_exploit_draft)
+    reg.register("publish_exploit_bundle", publish_exploit_bundle)
     reg.register("read_source_files", read_source_files)
     reg.register("search_code", search_code)
     reg.register("git_diff_inspect", git_diff_inspect)
