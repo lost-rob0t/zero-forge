@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 import yaml
@@ -240,6 +241,235 @@ def test_default_config_paths_exist():
     assert DEFAULT_CONFIG_PATHS
 
 
+# --- XDG config path tests ------------------------------------------------
+
+
+def test_user_config_paths_respects_xdg_config_home(tmp_path, monkeypatch):
+    """_user_config_paths uses XDG_CONFIG_HOME when set."""
+    from zero_forge.config import _user_config_paths
+
+    xdg_dir = tmp_path / "custom-xdg"
+    xdg_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+
+    paths = _user_config_paths()
+    assert len(paths) == 2
+    assert paths[0] == str(xdg_dir / "zeroforge" / "config.yaml")
+    assert paths[1] == str(xdg_dir / "zeroforge" / "config.yml")
+
+
+def test_user_config_paths_falls_back_to_home(monkeypatch):
+    """_user_config_paths falls back to ~/.config when XDG_CONFIG_HOME unset."""
+    from zero_forge.config import _user_config_paths
+
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    paths = _user_config_paths()
+    expected_dir = Path.home() / ".config" / "zeroforge"
+    assert paths[0] == str(expected_dir / "config.yaml")
+    assert paths[1] == str(expected_dir / "config.yml")
+
+
+def test_user_config_paths_empty_xdg_falls_back(monkeypatch):
+    """Empty XDG_CONFIG_HOME string falls back to ~/.config."""
+    from zero_forge.config import _user_config_paths
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", "")
+
+    paths = _user_config_paths()
+    expected_dir = Path.home() / ".config" / "zeroforge"
+    assert paths[0] == str(expected_dir / "config.yaml")
+
+
+def test_load_config_from_xdg_path(tmp_path, monkeypatch, clean_env):
+    """load_config picks up config.yaml from XDG_CONFIG_HOME."""
+    xdg_dir = tmp_path / "xdg-config"
+    app_dir = xdg_dir / "zeroforge"
+    app_dir.mkdir(parents=True)
+    config_file = app_dir / "config.yaml"
+    config_file.write_text(yaml.dump({"models": {"smart": {"model": "xdg-model"}}}))
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+
+    settings = load_config()
+    assert settings.models.smart.model == "xdg-model"
+
+
+def test_local_config_takes_priority_over_xdg(tmp_path, monkeypatch, clean_env):
+    """./zeroforge.yaml takes priority over XDG config path."""
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+
+    xdg_dir = tmp_path / "xdg-config"
+    app_dir = xdg_dir / "zeroforge"
+    app_dir.mkdir(parents=True)
+    (app_dir / "config.yaml").write_text(yaml.dump({"models": {"smart": {"model": "xdg-model"}}}))
+
+    local_config = work_dir / "zeroforge.yaml"
+    local_config.write_text(yaml.dump({"models": {"smart": {"model": "local-model"}}}))
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(work_dir)
+
+    settings = load_config()
+    assert settings.models.smart.model == "local-model"
+
+
+# --- ensure_default_config tests -----------------------------------------
+
+
+def test_ensure_default_config_writes_when_none(tmp_path, monkeypatch, clean_env):
+    """ensure_default_config writes a default config to XDG path when none exists."""
+    from zero_forge.config import ensure_default_config
+
+    xdg_dir = tmp_path / "xdg"
+    xdg_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+
+    result = ensure_default_config()
+    assert result is not None
+    assert result.exists()
+    assert result == xdg_dir / "zeroforge" / "config.yaml"
+
+
+def test_ensure_default_config_returns_none_when_exists(tmp_path, monkeypatch, clean_env):
+    """ensure_default_config returns None when a config already exists."""
+    from zero_forge.config import ensure_default_config
+
+    xdg_dir = tmp_path / "xdg"
+    app_dir = xdg_dir / "zeroforge"
+    app_dir.mkdir(parents=True)
+    (app_dir / "config.yaml").write_text("models:\n  smart:\n    model: existing\n")
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+
+    result = ensure_default_config()
+    assert result is None
+
+
+def test_ensure_default_config_returns_none_when_local_exists(tmp_path, monkeypatch, clean_env):
+    """ensure_default_config returns None when a local config already exists."""
+    from zero_forge.config import ensure_default_config
+
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    (work_dir / "zeroforge.yaml").write_text("models:\n  smart:\n    model: local\n")
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.chdir(work_dir)
+
+    result = ensure_default_config()
+    assert result is None
+
+
+def test_ensure_default_config_written_file_loads(tmp_path, monkeypatch, clean_env):
+    """The default config written by ensure_default_config is loadable."""
+    from zero_forge.config import ensure_default_config, load_config
+
+    xdg_dir = tmp_path / "xdg"
+    xdg_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+
+    written_path = ensure_default_config()
+    assert written_path is not None
+
+    settings = load_config()
+    assert settings.models.smart.model == "gpt-4o"
+    assert settings.models.tool.model == "gpt-4o-mini"
+    assert settings.output.dir == "./output"
+
+
+def test_ensure_default_config_falls_back_to_home(tmp_path, monkeypatch, clean_env):
+    """ensure_default_config falls back to ~/.config when XDG_CONFIG_HOME unset."""
+    from zero_forge.config import ensure_default_config
+
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    # Use a fake home so we don't write to the real one
+    fake_home = tmp_path / "fake-home"
+    fake_home.mkdir()
+    monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
+
+    result = ensure_default_config()
+    assert result is not None
+    assert result == fake_home / ".config" / "zeroforge" / "config.yaml"
+    assert result.exists()
+
+
+def test_user_config_paths_rejects_relative_xdg(monkeypatch):
+    """Relative XDG_CONFIG_HOME is ignored; falls back to ~/.config."""
+    from zero_forge.config import _user_config_paths
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", "relative/path")
+
+    paths = _user_config_paths()
+    expected_dir = Path.home() / ".config" / "zeroforge"
+    assert paths[0] == str(expected_dir / "config.yaml")
+    assert paths[1] == str(expected_dir / "config.yml")
+
+
+def test_ensure_default_config_respects_env_config_path(tmp_path, monkeypatch, clean_env):
+    """ensure_default_config returns None when ZERO_FORGE_CONFIG_PATH points to existing file."""
+    from zero_forge.config import ensure_default_config
+
+    custom_config = tmp_path / "custom.yaml"
+    custom_config.write_text(yaml.dump({"models": {"smart": {"model": "custom"}}}))
+
+    monkeypatch.setenv("ZERO_FORGE_CONFIG_PATH", str(custom_config))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.chdir(tmp_path)
+
+    result = ensure_default_config()
+    assert result is None
+
+
+def test_ensure_default_config_creates_dir_with_mode_0700(tmp_path, monkeypatch, clean_env):
+    """XDG config directory is created with mode 0700 per XDG spec."""
+    import stat
+
+    from zero_forge.config import ensure_default_config
+
+    xdg_dir = tmp_path / "xdg"
+    xdg_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+
+    result = ensure_default_config()
+    assert result is not None
+
+    app_dir = xdg_dir / "zeroforge"
+    mode = stat.S_IMODE(app_dir.stat().st_mode)
+    assert mode == 0o700
+
+
+def test_generate_exits_after_creating_default_config(tmp_path, monkeypatch, clean_env):
+    """CLI generate exits after writing default config; run_workflow is not called."""
+    from typer.testing import CliRunner
+
+    from zero_forge.cli import app
+
+    xdg_dir = tmp_path / "xdg"
+    xdg_dir.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_dir))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("ZERO_FORGE_CONFIG_PATH", raising=False)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["generate", "--cve", "CVE-2021-44228"])
+
+    assert result.exit_code == 0
+    assert "Created default config" in result.stdout
+    assert (xdg_dir / "zeroforge" / "config.yaml").exists()
+
+    # Verify run_workflow was not called — no workflow output should exist
+    assert "generating artifact" not in result.stdout.lower()
+
+
 # --- .env file loading tests (issue #109) --------------------------------
 
 
@@ -256,6 +486,7 @@ def test_load_env_file_populates_os_environ(tmp_path, monkeypatch):
     _load_env_file()
 
     import os
+
     assert os.environ.get("TEST_ENV_VAR") == "hello_from_dotenv"
 
 
@@ -272,6 +503,7 @@ def test_load_env_file_handles_export_prefix(tmp_path, monkeypatch):
     _load_env_file()
 
     import os
+
     assert os.environ.get("TEST_EXPORT_VAR") == "exported_value"
 
 
@@ -288,6 +520,7 @@ def test_load_env_file_does_not_override_existing(tmp_path, monkeypatch):
     _load_env_file()
 
     import os
+
     assert os.environ.get("EXISTING_VAR") == "from_shell"
 
 

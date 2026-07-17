@@ -207,11 +207,111 @@ def _apply_env_overrides(settings: Settings) -> Settings:
     return Settings(**data)
 
 
+def _user_config_paths() -> list[str]:
+    """Return XDG-aware config file paths under the user config directory.
+
+    Respects XDG_CONFIG_HOME when set to an absolute path; falls back to
+    ~/.config when unset, empty, or relative (per the XDG Base Directory
+    Specification, relative values are invalid and must be ignored).
+    """
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "")
+    candidate = Path(xdg_config_home).expanduser() if xdg_config_home else None
+    if candidate is not None and candidate.is_absolute():
+        config_dir = candidate
+    else:
+        config_dir = Path.home() / ".config"
+    app_dir = config_dir / "zeroforge"
+    return [
+        str(app_dir / "config.yaml"),
+        str(app_dir / "config.yml"),
+    ]
+
+
 DEFAULT_CONFIG_PATHS: list[str] = [
     "./zeroforge.yaml",
     "./zeroforge.yml",
-    "~/.config/zeroforge/config.yaml",
+    *_user_config_paths(),
 ]
+
+
+DEFAULT_CONFIG_TEMPLATE = """\
+# ZeroForge configuration
+# Edit this file to customize model, logging, and workflow settings.
+# API keys are environment-only.  A .env file in the working directory is
+# loaded automatically before settings resolution; shell variables take
+# precedence over .env values.  Use ZERO_FORGE_ENV_FILE for a custom path:
+#   export ZERO_FORGE_ENV_FILE=/path/to/.env
+#   export OPENROUTER_API_KEY="sk-..."
+#   export OPENAI_API_KEY="sk-..."
+#   export ANTHROPIC_API_KEY="sk-..."
+
+models:
+  smart:
+    provider: "auto"            # auto, openrouter, openai, or anthropic
+    model: "gpt-4o"             # reasoning and artifact-writing model
+    temperature: 0.3
+    max_tokens: 4096
+    auto_max_tokens: true       # infer max_tokens from provider API
+    inferred_max_token_cap: 8192 # upper bound for inferred max_tokens
+    base_url: ""                # optional LiteLLM-compatible endpoint
+
+  tool:
+    provider: "auto"            # independently resolved provider
+    model: "gpt-4o-mini"        # cheap/fast registered-tool caller
+    temperature: 0.0
+    max_tokens: 1024
+    auto_max_tokens: true       # infer max_tokens from provider API
+    inferred_max_token_cap: 8192 # upper bound for inferred max_tokens
+    base_url: ""                # may differ from the Smart model endpoint
+
+llm:
+  stub_mode: false              # placeholder mode; never completes or saves
+
+logging:
+  level: "INFO"                 # TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL
+  model_io_level: "TRACE"       # minimum level for model I/O (prompts/responses)
+
+workflow:
+  max_repair_attempts: 3
+  unsafe_source_collection: false
+
+output:
+  dir: "./output"
+"""
+
+
+def ensure_default_config() -> Path | None:
+    """Write a default config to the XDG path if no config exists.
+
+    Returns the path to the newly written file, or None if a config
+    already exists in any search location (including ZERO_FORGE_CONFIG_PATH).
+    """
+    # Respect ZERO_FORGE_CONFIG_PATH — if it points to an existing file,
+    # the user already has a config and we should not write a new one.
+    env_path = os.environ.get("ZERO_FORGE_CONFIG_PATH")
+    if env_path and Path(env_path).expanduser().exists():
+        return None
+
+    search_paths = ["./zeroforge.yaml", "./zeroforge.yml", *_user_config_paths()]
+    for candidate in search_paths:
+        if Path(candidate).expanduser().exists():
+            return None
+
+    # Use the same XDG resolution as _user_config_paths() for the target dir.
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "")
+    candidate_dir = Path(xdg_config_home).expanduser() if xdg_config_home else None
+    if candidate_dir is not None and candidate_dir.is_absolute():
+        config_dir = candidate_dir
+    else:
+        config_dir = Path.home() / ".config"
+    app_dir = config_dir / "zeroforge"
+    # XDG spec: newly created config dirs should have mode 0700.
+    app_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # Respect the mode even if the directory already existed with broader perms.
+    os.chmod(app_dir, 0o700)
+    config_path = app_dir / "config.yaml"
+    config_path.write_text(DEFAULT_CONFIG_TEMPLATE, encoding="utf-8")
+    return config_path
 
 
 def load_config(path: str | Path | None = None) -> Settings:
@@ -227,7 +327,8 @@ def load_config(path: str | Path | None = None) -> Settings:
             raise FileNotFoundError(f"Config file not found: {config_path}")
         yaml_data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     else:
-        for candidate in DEFAULT_CONFIG_PATHS:
+        search_paths = ["./zeroforge.yaml", "./zeroforge.yml", *_user_config_paths()]
+        for candidate in search_paths:
             config_path = Path(candidate).expanduser()
             if config_path.exists():
                 yaml_data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}

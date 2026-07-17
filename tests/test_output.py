@@ -1,5 +1,6 @@
 """Tests for ZeroForge output module."""
 
+import asyncio
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -8,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import zero_forge.output as output_module
-from zero_forge.output import ArtifactPathError, save_artifact
+from zero_forge.output import ArtifactPathError, save_artifact, save_artifact_async
 from zero_forge.schemas import Artifact, ArtifactType
 
 
@@ -37,6 +38,33 @@ def test_save_artifact(tmp_path):
     meta = json.loads(meta_path.read_text())
     assert meta["artifact_type"] == "metasploit"
     assert meta["cve_id"] == "CVE-2021-44228"
+
+
+def test_save_artifact_async_publishes_complete_pair(tmp_path):
+    art = _make_artifact("async_exploit.rb")
+
+    path = Path(asyncio.run(save_artifact_async(art, output_dir=tmp_path)))
+
+    assert path.read_text() == "class MetasploitModule\nend\n"
+    meta = json.loads(path.with_suffix(".rb.meta.json").read_text())
+    assert meta["artifact_type"] == "metasploit"
+    assert meta["filename"] == path.name
+
+
+def test_save_artifact_async_uses_worker_thread(tmp_path, monkeypatch):
+    calls = []
+
+    async def fake_to_thread(function, *args):
+        calls.append((function, args))
+        return "saved-path"
+
+    monkeypatch.setattr(output_module.asyncio, "to_thread", fake_to_thread)
+    artifact = _make_artifact("async_exploit.rb")
+
+    result = asyncio.run(save_artifact_async(artifact, output_dir=tmp_path))
+
+    assert result == "saved-path"
+    assert calls == [(save_artifact, (artifact, tmp_path))]
 
 
 def test_save_artifact_default_filename(tmp_path):
@@ -245,6 +273,21 @@ def test_save_artifact_never_overwrites_existing_pair(tmp_path):
     assert first_path.with_suffix(".rb.meta.json").read_text() == first_meta
 
 
+def test_save_artifact_async_preserves_collision_error(tmp_path):
+    first = _make_artifact("async_collision.rb")
+    first.content = "first"
+    first_path = Path(save_artifact(first, output_dir=tmp_path))
+    first_meta = first_path.with_suffix(".rb.meta.json").read_text()
+
+    second = _make_artifact("async_collision.rb")
+    second.content = "second"
+    with pytest.raises(ArtifactPathError, match="refusing to overwrite"):
+        asyncio.run(save_artifact_async(second, output_dir=tmp_path))
+
+    assert first_path.read_text() == "first"
+    assert first_path.with_suffix(".rb.meta.json").read_text() == first_meta
+
+
 def test_sidecar_collision_leaves_no_artifact_placeholder(tmp_path):
     sidecar = tmp_path / "collision.rb.meta.json"
     sidecar.write_text("existing", encoding="utf-8")
@@ -271,6 +314,27 @@ def test_partial_publish_failure_cleans_entire_pair(tmp_path, monkeypatch):
 
     with pytest.raises(ArtifactPathError, match="simulated artifact publish failure"):
         save_artifact(_make_artifact("partial.rb"), output_dir=tmp_path)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_async_partial_publish_failure_cleans_entire_pair(tmp_path, monkeypatch):
+    real_replace = os.replace
+    replacements = 0
+
+    def fail_second_replace(source, destination):
+        nonlocal replacements
+        replacements += 1
+        if replacements == 2:
+            raise OSError("simulated async artifact publish failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(output_module.os, "replace", fail_second_replace)
+
+    with pytest.raises(ArtifactPathError, match="async artifact publish failure"):
+        asyncio.run(
+            save_artifact_async(_make_artifact("async_partial.rb"), output_dir=tmp_path)
+        )
 
     assert list(tmp_path.iterdir()) == []
 
