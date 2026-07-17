@@ -15,6 +15,24 @@ CISA_KEV_URL = (
 )
 
 _USER_AGENT = "ZeroForge/0.1"
+_GITHUB_ECOSYSTEMS = {
+    "actions": "actions",
+    "composer": "composer",
+    "crates.io": "rust",
+    "erlang": "erlang",
+    "go": "go",
+    "hex": "erlang",
+    "maven": "maven",
+    "npm": "npm",
+    "nuget": "nuget",
+    "other": "other",
+    "pip": "pip",
+    "pub": "pub",
+    "pypi": "pip",
+    "rubygems": "rubygems",
+    "rust": "rust",
+    "swift": "swift",
+}
 
 
 def _bounded_limit(max_results: int) -> int:
@@ -219,13 +237,13 @@ def github_advisory_search(
     queries.extend({"ghsa_id": value.strip().upper()} for value in ghsa_ids if value.strip())
 
     package_name = package_name.strip()
-    ecosystem = ecosystem.strip().lower()
+    github_ecosystem = _GITHUB_ECOSYSTEMS.get(ecosystem.strip().lower(), "")
     version = version.strip()
     if package_name:
         package_query = package_name if not version else f"{package_name}@{version}"
         query = {"affects": package_query}
-        if ecosystem:
-            query["ecosystem"] = ecosystem
+        if github_ecosystem:
+            query["ecosystem"] = github_ecosystem
         queries.append(query)
 
     if not queries:
