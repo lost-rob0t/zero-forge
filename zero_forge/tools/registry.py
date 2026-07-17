@@ -20,7 +20,7 @@ class ToolRegistry:
     def register(self, name: str, func: Callable[..., Any]) -> None:
         """Register a tool under *name*."""
         if name in self._tools:
-            raise ValueError(f"Tool '{name}' is already registered")
+            raise ValueError(f"Tool '{name}' already registered")
         self._tools[name] = func
 
     def get(self, name: str) -> Callable[..., Any]:
@@ -45,18 +45,29 @@ def create_default_registry() -> ToolRegistry:
     """Create and populate a registry with the default built-in tools."""
     from .advisory_lookup import cisa_kev_lookup, github_advisory_search, osv_query
     from .cve_lookup import cve_lookup
+    from .exploit_workspace import (
+        prepare_exploit_workspace,
+        validate_exploit_draft,
+        write_exploit_draft,
+    )
     from .source_inspect import git_diff_inspect, read_source_files, search_code
     from .validator import (
         validate_metasploit,
         validate_zap_active_scan,
         validate_zap_passive_scan,
     )
+    from .web_research import fetch_web_page, web_search
 
     reg = ToolRegistry()
     reg.register("cve_lookup", cve_lookup)
     reg.register("osv_query", osv_query)
     reg.register("github_advisory_search", github_advisory_search)
     reg.register("cisa_kev_lookup", cisa_kev_lookup)
+    reg.register("web_search", web_search)
+    reg.register("fetch_web_page", fetch_web_page)
+    reg.register("prepare_exploit_workspace", prepare_exploit_workspace)
+    reg.register("write_exploit_draft", write_exploit_draft)
+    reg.register("validate_exploit_draft", validate_exploit_draft)
     reg.register("read_source_files", read_source_files)
     reg.register("search_code", search_code)
     reg.register("git_diff_inspect", git_diff_inspect)
