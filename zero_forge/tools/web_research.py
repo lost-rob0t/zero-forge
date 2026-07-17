@@ -278,7 +278,11 @@ def _validate_public_https_url(url: str) -> urllib.parse.ParseResult:
         raise ValueError("URLs containing credentials are not allowed")
 
     try:
-        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+        addresses = socket.getaddrinfo(
+            parsed.hostname,
+            parsed.port or 443,
+            type=socket.SOCK_STREAM,
+        )
     except socket.gaierror as exc:
         raise ValueError(f"could not resolve URL host: {exc}") from exc
     if not addresses:
@@ -292,18 +296,19 @@ def _validate_public_https_url(url: str) -> urllib.parse.ParseResult:
 
 def fetch_web_page(
     url: str,
-    max_bytes: int = 200_000,
+    max_bytes: int = 2_000_000,
     timeout: int = 15,
 ) -> dict[str, Any]:
-    """Fetch one public HTTPS page with SSRF and response-size controls."""
+    """Fetch a bounded prefix of one public HTTPS page with SSRF controls."""
 
-    if not 1 <= max_bytes <= 1_000_000:
-        raise ValueError("max_bytes must be between 1 and 1000000")
+    if not 1 <= max_bytes <= 5_000_000:
+        raise ValueError("max_bytes must be between 1 and 5000000")
     _validate_public_https_url(url)
     request = urllib.request.Request(
         url,
         headers={
             "Accept": "text/html,text/plain,application/json,application/xml;q=0.9",
+            "Accept-Encoding": "identity",
             "User-Agent": _USER_AGENT,
         },
     )
@@ -314,8 +319,9 @@ def fetch_web_page(
         if not any(content_type.startswith(value) for value in _ALLOWED_CONTENT_TYPES):
             raise ValueError(f"unsupported response content type: {content_type}")
         raw = response.read(max_bytes + 1)
-        if len(raw) > max_bytes:
-            raise ValueError("web response exceeded max_bytes")
+        truncated = len(raw) > max_bytes
+        if truncated:
+            raw = raw[:max_bytes]
         charset = response.headers.get_content_charset() or "utf-8"
 
     decoded = raw.decode(charset, errors="replace")
@@ -337,4 +343,5 @@ def fetch_web_page(
         "sha256": hashlib.sha256(raw).hexdigest(),
         "retrieved_at": datetime.now(UTC).isoformat(),
         "size_bytes": len(raw),
+        "truncated": truncated,
     }
