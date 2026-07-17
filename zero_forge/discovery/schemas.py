@@ -66,7 +66,7 @@ class VariantAnalysisRequest(StrictModel):
     unsafe_source: bool = False
 
     @model_validator(mode="after")
-    def require_seed(self) -> "VariantAnalysisRequest":
+    def require_seed(self) -> VariantAnalysisRequest:
         if not self.seed_summary.strip() and not self.seed_diff.strip():
             raise ValueError("seed_summary or seed_diff is required")
         return self
