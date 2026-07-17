@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -387,3 +388,345 @@ def call_model(
         attempt=attempt + max_attempts - 1,
         max_attempts=max_attempts,
     )
+
+
+# --- Async variants (issue #83) -----------------------------------------
+
+
+async def _resolve_openrouter_limit_async(model_id: str) -> int | None:
+    """Query the OpenRouter models endpoint asynchronously using httpx."""
+    bare = model_id.removeprefix("openrouter/")
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(_OPENROUTER_MODELS_URL)
+            data = resp.json()
+    except Exception as exc:
+        logger.debug("OpenRouter async models lookup failed for %s: %s", bare, exc)
+        return None
+    for entry in data.get("data", []):
+        if entry.get("id") == bare:
+            top = entry.get("top_provider") or {}
+            val = top.get("max_completion_tokens")
+            if isinstance(val, int) and val > 0:
+                return val
+    return None
+
+
+async def resolve_model_limits_async(
+    model: str, provider: str, api_key: str | None
+) -> int | None:
+    """Async variant of resolve_model_limits using httpx."""
+    cache_key = f"{provider}:{model}"
+    if cache_key in _MODEL_LIMITS_CACHE:
+        return _MODEL_LIMITS_CACHE[cache_key]
+
+    result: int | None = None
+    if provider == "openrouter":
+        result = await _resolve_openrouter_limit_async(model)
+    elif provider in ("openai", "anthropic"):
+        result = _resolve_litellm_limit(model)
+
+    _MODEL_LIMITS_CACHE[cache_key] = result
+    return result
+
+
+async def call_model_async(
+    role: str,
+    config: ModelConfig,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    additional_messages: list[dict[str, str]] | None = None,
+    attempt: int = 1,
+    max_attempts: int = 3,
+    on_chunk: Callable[[str], None] | None = None,
+) -> str:
+    """Async variant of call_model using litellm.acompletion.
+
+    When ``on_chunk`` is provided, enables streaming (``stream=True``)
+    and invokes the callback for each text chunk as it arrives.
+
+    Streaming does not retry on token exhaustion.  Once partial chunks have
+    been delivered to the caller via ``on_chunk``, replaying the request
+    would duplicate already-seen output.  The non-streaming path retains
+    the full token-exhaustion retry loop.  If a streaming response yields
+    empty content, an ``LLMResponseError`` is raised so the caller can
+    decide whether to fall back to a non-streaming retry.
+    """
+    resolved = resolve_model(role, config)
+    if not resolved.api_key:
+        raise LLMConfigurationError(
+            "No API key configured for the selected model provider",
+            role=role,
+            provider=resolved.provider,
+            model=resolved.model,
+            retryable=False,
+            attempt=attempt,
+            max_attempts=max_attempts,
+        )
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    if additional_messages:
+        messages.extend(additional_messages)
+
+    max_tokens = config.max_tokens
+    if config.auto_max_tokens:
+        env_var = f"ZERO_FORGE_{role.upper()}_MAX_TOKENS"
+        if not os.environ.get(env_var):
+            inferred = await resolve_model_limits_async(
+                resolved.model, resolved.provider, resolved.api_key,
+            )
+            if inferred is not None:
+                max_tokens = min(inferred, config.inferred_max_token_cap)
+                logger.debug(
+                    "Auto-inferred max_tokens=%d for role=%s model=%s "
+                    "(inferred=%d, cap=%d)",
+                    max_tokens, role, resolved.model,
+                    inferred, config.inferred_max_token_cap,
+                )
+
+    import litellm
+
+    # --- Streaming path ---
+    # Streaming does not retry on token exhaustion. Once partial chunks have
+    # been delivered to the caller via on_chunk, replaying the request would
+    # duplicate already-seen output. The non-streaming path retains the full
+    # token-exhaustion retry loop.
+    if on_chunk is not None:
+        try:
+            response = await litellm.acompletion(
+                model=resolved.model,
+                api_key=resolved.api_key,
+                messages=messages,
+                temperature=config.temperature,
+                max_tokens=max_tokens,
+                stream=True,
+                **resolved.extra_kwargs,
+            )
+        except Exception as exc:
+            raise LLMProviderError(
+                f"LLM async streaming request failed with {type(exc).__name__}",
+                role=role,
+                provider=resolved.provider,
+                model=resolved.model,
+                retryable=_is_retryable_provider_error(exc),
+                attempt=attempt,
+                max_attempts=max_attempts,
+            ) from exc
+
+        collected: list[str] = []
+        _callback_phase = False
+        try:
+            async for chunk in response:
+                try:
+                    delta = chunk.choices[0].delta.content
+                except (AttributeError, IndexError, TypeError):
+                    continue
+                if isinstance(delta, str) and delta:
+                    collected.append(delta)
+                    # Callback errors are consumer/UI failures, not provider
+                    # failures.  Use a phase flag so the except handler below
+                    # can distinguish provider-iteration errors from callback
+                    # errors and let the latter propagate unchanged.
+                    _callback_phase = True
+                    on_chunk(delta)
+                    _callback_phase = False
+        except Exception as exc:
+            if _callback_phase:
+                raise
+            raise LLMProviderError(
+                f"LLM async streaming failed with {type(exc).__name__}",
+                role=role,
+                provider=resolved.provider,
+                model=resolved.model,
+                retryable=_is_retryable_provider_error(exc),
+                attempt=attempt,
+                max_attempts=max_attempts,
+            ) from exc
+
+        content = "".join(collected)
+        if content.strip():
+            return content
+        raise LLMResponseError(
+            "LLM async streaming produced empty content",
+            role=role,
+            provider=resolved.provider,
+            model=resolved.model,
+            retryable=False,
+            attempt=attempt,
+            max_attempts=max_attempts,
+        )
+
+    # --- Non-streaming async path ---
+    current_max_tokens = max_tokens
+    for current_attempt in range(attempt, attempt + max_attempts):
+        try:
+            response = await litellm.acompletion(
+                model=resolved.model,
+                api_key=resolved.api_key,
+                messages=messages,
+                temperature=config.temperature,
+                max_tokens=current_max_tokens,
+                **resolved.extra_kwargs,
+            )
+        except Exception as exc:
+            raise LLMProviderError(
+                f"LLM async request failed with {type(exc).__name__}",
+                role=role,
+                provider=resolved.provider,
+                model=resolved.model,
+                retryable=_is_retryable_provider_error(exc),
+                attempt=current_attempt,
+                max_attempts=max_attempts,
+            ) from exc
+
+        try:
+            content = response.choices[0].message.content
+        except (AttributeError, IndexError, KeyError, TypeError) as exc:
+            raise LLMResponseError(
+                "LLM async response did not contain a message",
+                role=role,
+                provider=resolved.provider,
+                model=resolved.model,
+                retryable=False,
+                attempt=current_attempt,
+                max_attempts=max_attempts,
+            ) from exc
+
+        if isinstance(content, str) and content.strip():
+            return content
+
+        finish_reason = _safe_finish_reason(response)
+        reasoning_tokens = _safe_reasoning_tokens(response)
+        if finish_reason == "length":
+            if current_attempt < attempt + max_attempts - 1:
+                new_max = min(current_max_tokens * 2, _MAX_TOKENS_HARD_CEILING)
+                current_max_tokens = new_max
+                continue
+            raise LLMResponseError(
+                "Token budget exhausted on reasoning "
+                f"(finish_reason=length, reasoning_tokens={reasoning_tokens})",
+                role=role,
+                provider=resolved.provider,
+                model=resolved.model,
+                retryable=True,
+                attempt=current_attempt,
+                max_attempts=max_attempts,
+            )
+
+        raise LLMResponseError(
+            "LLM async response contained empty message content",
+            role=role,
+            provider=resolved.provider,
+            model=resolved.model,
+            retryable=False,
+            attempt=current_attempt,
+            max_attempts=max_attempts,
+        )
+
+    raise LLMResponseError(
+        "LLM async call loop exited without producing a result",
+        role=role,
+        provider=resolved.provider,
+        model=resolved.model,
+        retryable=False,
+        attempt=attempt + max_attempts - 1,
+        max_attempts=max_attempts,
+    )
+
+
+async def stream_model(
+    role: str,
+    config: ModelConfig,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    additional_messages: list[dict[str, str]] | None = None,
+    attempt: int = 1,
+    max_attempts: int = 1,
+) -> AsyncIterator[str]:
+    """Async generator yielding text chunks from litellm.acompletion(stream=True).
+
+    Raises the same ``LLMCallError`` hierarchy on failure, including
+    ``attempt`` and ``max_attempts`` context.
+
+    Streaming does not retry on token exhaustion.  Once partial chunks have
+    been yielded to the caller, replaying the request would duplicate
+    already-seen output.  Callers that need token-exhaustion retry semantics
+    should use :func:`call_model_async` without ``on_chunk``.
+    """
+    resolved = resolve_model(role, config)
+    if not resolved.api_key:
+        raise LLMConfigurationError(
+            "No API key configured for the selected model provider",
+            role=role,
+            provider=resolved.provider,
+            model=resolved.model,
+            retryable=False,
+            attempt=attempt,
+            max_attempts=max_attempts,
+        )
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    if additional_messages:
+        messages.extend(additional_messages)
+
+    max_tokens = config.max_tokens
+    if config.auto_max_tokens:
+        env_var = f"ZERO_FORGE_{role.upper()}_MAX_TOKENS"
+        if not os.environ.get(env_var):
+            inferred = await resolve_model_limits_async(
+                resolved.model, resolved.provider, resolved.api_key,
+            )
+            if inferred is not None:
+                max_tokens = min(inferred, config.inferred_max_token_cap)
+
+    import litellm
+
+    try:
+        response = await litellm.acompletion(
+            model=resolved.model,
+            api_key=resolved.api_key,
+            messages=messages,
+            temperature=config.temperature,
+            max_tokens=max_tokens,
+            stream=True,
+            **resolved.extra_kwargs,
+        )
+    except Exception as exc:
+        raise LLMProviderError(
+            f"LLM stream request failed with {type(exc).__name__}",
+            role=role,
+            provider=resolved.provider,
+            model=resolved.model,
+            retryable=_is_retryable_provider_error(exc),
+            attempt=attempt,
+            max_attempts=max_attempts,
+        ) from exc
+
+    try:
+        async for chunk in response:
+            try:
+                delta = chunk.choices[0].delta.content
+            except (AttributeError, IndexError, TypeError):
+                continue
+            if isinstance(delta, str) and delta:
+                yield delta
+    except Exception as exc:
+        raise LLMProviderError(
+            f"LLM streaming failed with {type(exc).__name__}",
+            role=role,
+            provider=resolved.provider,
+            model=resolved.model,
+            retryable=_is_retryable_provider_error(exc),
+            attempt=attempt,
+            max_attempts=max_attempts,
+        ) from exc

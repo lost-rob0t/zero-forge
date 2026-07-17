@@ -343,3 +343,427 @@ def test_call_model_default_max_attempts_is_three(clean_env, monkeypatch):
 
     sig = inspect.signature(_cm)
     assert sig.parameters["max_attempts"].default == 3
+
+
+
+# --- Async tests (issue #83) ---------------------------------------------
+
+import asyncio  # noqa: E402
+
+
+def test_call_model_async_returns_content(clean_env, monkeypatch):
+    """call_model_async returns content from litellm.acompletion."""
+    from zero_forge.agents.llm import call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    async def fake_acompletion(**kwargs):
+        return _FakeResponse("hello async world")
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        result = asyncio.run(call_model_async("smart", config, "sys", "user"))
+
+    assert result == "hello async world"
+
+
+def test_call_model_async_streaming_with_on_chunk(clean_env, monkeypatch):
+    """call_model_async with on_chunk streams chunks."""
+    from zero_forge.agents.llm import call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    chunks_received = []
+
+    class _FakeChunk:
+        def __init__(self, content):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": content})(),
+            })()]
+
+    async def fake_acompletion(**kwargs):
+        assert kwargs.get("stream") is True
+        async def _gen():
+            for c in ("Hello", " ", "World"):
+                yield _FakeChunk(c)
+        return _gen()
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        result = asyncio.run(call_model_async(
+            "smart", config, "sys", "user",
+            on_chunk=chunks_received.append,
+        ))
+
+    assert result == "Hello World"
+    assert chunks_received == ["Hello", " ", "World"]
+
+
+def test_call_model_async_raises_on_no_api_key(clean_env, monkeypatch):
+    """call_model_async raises LLMConfigurationError without API key."""
+    from zero_forge.agents.llm import LLMConfigurationError, call_model_async
+
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    with pytest.raises(LLMConfigurationError, match="No API key"):
+        asyncio.run(call_model_async("smart", config, "sys", "user"))
+
+
+def test_call_model_async_raises_on_provider_error(clean_env, monkeypatch):
+    """call_model_async raises LLMProviderError on request failure."""
+    from zero_forge.agents.llm import LLMProviderError, call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    async def fake_acompletion(**kwargs):
+        raise Exception("connection timeout")
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        with pytest.raises(LLMProviderError, match="LLM async request failed"):
+            asyncio.run(call_model_async("smart", config, "sys", "user"))
+
+
+def test_stream_model_yields_chunks(clean_env, monkeypatch):
+    """stream_model async generator yields text chunks."""
+    from zero_forge.agents.llm import stream_model
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    class _FakeChunk:
+        def __init__(self, content):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": content})(),
+            })()]
+
+    async def fake_acompletion(**kwargs):
+        assert kwargs.get("stream") is True
+        async def _gen():
+            for c in ("chunk1", "chunk2", "chunk3"):
+                yield _FakeChunk(c)
+        return _gen()
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        async def _collect():
+            chunks = []
+            async for c in stream_model("smart", config, "sys", "user"):
+                chunks.append(c)
+            return chunks
+        result = asyncio.run(_collect())
+
+    assert result == ["chunk1", "chunk2", "chunk3"]
+
+
+# --- Additional async/streaming tests (PR #116 review) -------------------
+
+
+def test_call_model_async_streaming_empty_content_raises(clean_env, monkeypatch):
+    """Empty streamed content raises LLMResponseError, not silent success."""
+    from zero_forge.agents.llm import LLMResponseError, call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    class _FakeChunk:
+        def __init__(self, content):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": content})(),
+            })()]
+
+    async def fake_acompletion(**kwargs):
+        async def _gen():
+            yield _FakeChunk("")
+        return _gen()
+
+    chunks = []
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        with pytest.raises(LLMResponseError, match="empty content"):
+            asyncio.run(call_model_async(
+                "smart", config, "sys", "user",
+                on_chunk=chunks.append,
+            ))
+
+
+def test_call_model_async_streaming_malformed_chunks_skipped(clean_env, monkeypatch):
+    """Malformed or no-choice chunks are safely skipped during streaming."""
+    from zero_forge.agents.llm import call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    class _FakeChunk:
+        def __init__(self, content):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": content})(),
+            })()]
+
+    class _MalformedChunk:
+        choices = []
+
+    class _BadAttrChunk:
+        choices = [object()]  # no .delta
+
+    async def fake_acompletion(**kwargs):
+        async def _gen():
+            yield _MalformedChunk()
+            yield _BadAttrChunk()
+            yield _FakeChunk("good")
+        return _gen()
+
+    chunks = []
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        result = asyncio.run(call_model_async(
+            "smart", config, "sys", "user",
+            on_chunk=chunks.append,
+        ))
+
+    assert result == "good"
+    assert chunks == ["good"]
+
+
+def test_call_model_async_additional_messages_ordering(clean_env, monkeypatch):
+    """additional_messages are appended after system/user in async calls."""
+    from zero_forge.agents.llm import call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    captured = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return _FakeResponse("ok")
+
+    extra = [{"role": "assistant", "content": "prior"}, {"role": "user", "content": "more"}]
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        asyncio.run(call_model_async(
+            "smart", config, "sys", "user",
+            additional_messages=extra,
+        ))
+
+    msgs = captured["messages"]
+    assert msgs[0]["role"] == "system"
+    assert msgs[1]["role"] == "user"
+    assert msgs[2] == {"role": "assistant", "content": "prior"}
+    assert msgs[3] == {"role": "user", "content": "more"}
+
+
+def test_call_model_async_streaming_additional_messages_ordering(clean_env, monkeypatch):
+    """additional_messages ordering preserved in streaming path."""
+    from zero_forge.agents.llm import call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    captured = {}
+
+    class _FakeChunk:
+        def __init__(self, content):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": content})(),
+            })()]
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        async def _gen():
+            yield _FakeChunk("hi")
+        return _gen()
+
+    extra = [{"role": "assistant", "content": "ctx"}]
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        result = asyncio.run(call_model_async(
+            "smart", config, "sys", "user",
+            additional_messages=extra,
+            on_chunk=lambda _: None,
+        ))
+
+    assert result == "hi"
+    msgs = captured["messages"]
+    assert msgs[0]["role"] == "system"
+    assert msgs[1]["role"] == "user"
+    assert msgs[2] == {"role": "assistant", "content": "ctx"}
+
+
+def test_call_model_async_auto_infers_max_tokens(clean_env, monkeypatch):
+    """call_model_async uses inferred max_tokens when auto_max_tokens=True."""
+    from zero_forge.agents.llm import call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096)
+
+    captured = {}
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        return _FakeResponse("hello")
+
+    async def fake_resolve_limits(model, provider, api_key):
+        return 131072
+
+    with mock.patch("zero_forge.agents.llm.resolve_model_limits_async", side_effect=fake_resolve_limits):
+        with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+            result = asyncio.run(call_model_async("smart", config, "sys", "user"))
+
+    assert result == "hello"
+    assert captured["max_tokens"] == 8192  # min(131072, cap=8192)
+
+
+def test_call_model_async_streaming_provider_failure_before_iterator(clean_env, monkeypatch):
+    """Provider failure before the iterator is returned raises LLMProviderError."""
+    from zero_forge.agents.llm import LLMProviderError, call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    async def fake_acompletion(**kwargs):
+        raise Exception("service unavailable")
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        with pytest.raises(LLMProviderError, match="streaming request failed"):
+            asyncio.run(call_model_async(
+                "smart", config, "sys", "user",
+                on_chunk=lambda _: None,
+            ))
+
+
+def test_call_model_async_streaming_provider_failure_during_iteration(clean_env, monkeypatch):
+    """Provider failure during chunk iteration raises LLMProviderError."""
+    from zero_forge.agents.llm import LLMProviderError, call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    class _FakeChunk:
+        def __init__(self, content):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": content})(),
+            })()]
+
+    async def fake_acompletion(**kwargs):
+        async def _gen():
+            yield _FakeChunk("partial")
+            raise Exception("connection dropped")
+        return _gen()
+
+    chunks = []
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        with pytest.raises(LLMProviderError, match="streaming failed"):
+            asyncio.run(call_model_async(
+                "smart", config, "sys", "user",
+                on_chunk=chunks.append,
+            ))
+
+    assert chunks == ["partial"]
+
+
+def test_call_model_async_provider_error_includes_attempt_context(clean_env, monkeypatch):
+    """LLMProviderError from async path includes attempt and max_attempts."""
+    from zero_forge.agents.llm import LLMProviderError, call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    async def fake_acompletion(**kwargs):
+        raise Exception("timeout")
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        with pytest.raises(LLMProviderError) as exc_info:
+            asyncio.run(call_model_async(
+                "smart", config, "sys", "user",
+                attempt=2, max_attempts=5,
+            ))
+
+    assert exc_info.value.attempt == 2
+    assert exc_info.value.max_attempts == 5
+
+
+def test_call_model_async_callback_error_propagates_unchanged(clean_env, monkeypatch):
+    """Consumer callback errors propagate as-is, not wrapped as LLMProviderError."""
+    from zero_forge.agents.llm import call_model_async
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    class _FakeChunk:
+        def __init__(self, content):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": content})(),
+            })()]
+
+    async def fake_acompletion(**kwargs):
+        async def _gen():
+            yield _FakeChunk("data")
+        return _gen()
+
+    def bad_callback(_delta: str) -> None:
+        raise ValueError("consumer UI failure")
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        with pytest.raises(ValueError, match="consumer UI failure"):
+            asyncio.run(call_model_async(
+                "smart", config, "sys", "user",
+                on_chunk=bad_callback,
+            ))
+
+
+def test_stream_model_provider_failure_includes_attempt_context(clean_env, monkeypatch):
+    """stream_model LLMProviderError includes attempt and max_attempts."""
+    from zero_forge.agents.llm import LLMProviderError, stream_model
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    async def fake_acompletion(**kwargs):
+        raise Exception("timeout")
+
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        async def _collect():
+            async for _ in stream_model(
+                "smart", config, "sys", "user",
+                attempt=2, max_attempts=4,
+            ):
+                pass
+        with pytest.raises(LLMProviderError) as exc_info:
+            asyncio.run(_collect())
+
+    assert exc_info.value.attempt == 2
+    assert exc_info.value.max_attempts == 4
+
+
+def test_stream_model_additional_messages(clean_env, monkeypatch):
+    """stream_model accepts and orders additional_messages."""
+    from zero_forge.agents.llm import stream_model
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    config = ModelConfig(provider="openrouter", model="z-ai/glm-5.2", max_tokens=4096, auto_max_tokens=False)
+
+    captured = {}
+
+    class _FakeChunk:
+        def __init__(self, content):
+            self.choices = [type("C", (), {
+                "delta": type("D", (), {"content": content})(),
+            })()]
+
+    async def fake_acompletion(**kwargs):
+        captured.update(kwargs)
+        async def _gen():
+            yield _FakeChunk("ok")
+        return _gen()
+
+    extra = [{"role": "assistant", "content": "ctx"}]
+    with mock.patch("litellm.acompletion", side_effect=fake_acompletion):
+        async def _collect():
+            chunks = []
+            async for c in stream_model(
+                "smart", config, "sys", "user",
+                additional_messages=extra,
+            ):
+                chunks.append(c)
+            return chunks
+        result = asyncio.run(_collect())
+
+    assert result == ["ok"]
+    msgs = captured["messages"]
+    assert msgs[2] == {"role": "assistant", "content": "ctx"}

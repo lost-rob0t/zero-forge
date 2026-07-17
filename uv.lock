@@ -2379,6 +2379,7 @@ name = "zero-forge"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "langgraph" },
     { name = "litellm", version = "1.91.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
     { name = "litellm", version = "1.92.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
@@ -2398,6 +2399,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
     { name = "langgraph", specifier = ">=1.0" },
     { name = "litellm", marker = "python_full_version < '3.14'", specifier = ">=1.0" },
     { name = "litellm", marker = "python_full_version >= '3.14'", specifier = "<1.92" },
