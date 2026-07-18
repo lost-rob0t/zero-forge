@@ -14,12 +14,14 @@ _EXAMPLE_DIRECTORIES = {
     ArtifactType.METASPLOIT: Path("metasploit"),
     ArtifactType.ZAP_ACTIVE: Path("zap") / "active",
     ArtifactType.ZAP_PASSIVE: Path("zap") / "passive",
+    ArtifactType.NUCLEI: Path("nuclei"),
 }
 
 _EXAMPLE_SUFFIXES = {
     ArtifactType.METASPLOIT: ".rb",
     ArtifactType.ZAP_ACTIVE: ".js",
     ArtifactType.ZAP_PASSIVE: ".js",
+    ArtifactType.NUCLEI: ".yaml",
 }
 
 
