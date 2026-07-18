@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import typer
 from rich.console import Console
@@ -40,6 +41,22 @@ def register_lab_commands(
         no_args_is_help=True,
     )
     app.add_typer(lab_app, name="lab")
+    artifact_type_option = cast(
+        ArtifactType,
+        typer.Option(
+            ArtifactType.METASPLOIT,
+            "--type",
+            "-t",
+            help="Artifact type to generate",
+            case_sensitive=False,
+        ),
+    )
+    poc_output_option = cast(
+        Path, typer.Option(..., "--output", help="Destination directory")
+    )
+    run_dir_option = cast(
+        Path, typer.Option(..., "--run", help="Completed native lab run directory")
+    )
 
     @lab_app.command("run")
     def lab_run_command(
@@ -52,13 +69,7 @@ def register_lab_commands(
             "--ref",
             help="Branch, tag, or commit to resolve and check out as an immutable commit",
         ),
-        artifact_type: ArtifactType = typer.Option(
-            ArtifactType.METASPLOIT,
-            "--type",
-            "-t",
-            help="Artifact type to generate",
-            case_sensitive=False,
-        ),
+        artifact_type: ArtifactType = artifact_type_option,
         lab_root: str = typer.Option(
             "",
             "--lab-root",
@@ -163,7 +174,7 @@ def register_lab_commands(
 
     @lab_app.command("poc")
     def lab_poc_command(
-        output: Path = typer.Option(..., "--output", help="Destination directory"),
+        output: Path = poc_output_option,
         cve_id: str = typer.Option("", "--cve", help="CVE to search"),
         query: str = typer.Option("", "--query", help="Arbitrary SearchSploit query"),
         name: str = typer.Option("", "--name", help="Override the output filename label"),
@@ -187,7 +198,7 @@ def register_lab_commands(
 
     @lab_app.command("promote")
     def lab_promote_command(
-        run_dir: Path = typer.Option(..., "--run", help="Completed native lab run directory"),
+        run_dir: Path = run_dir_option,
         lab_root: str = typer.Option(
             "",
             "--lab-root",
