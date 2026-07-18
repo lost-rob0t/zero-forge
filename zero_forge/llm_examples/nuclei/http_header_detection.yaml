@@ -1,0 +1,22 @@
+id: zeroforge-http-header-detection
+
+info:
+  name: HTTP Header Detection Example
+  author:
+    - zeroforge
+  severity: info
+  description: Demonstrates a bounded HTTP response-header matcher.
+  reference:
+    - https://docs.projectdiscovery.io/templates/protocols/http/basic-http
+  tags: http,example,zeroforge
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+
+    matchers:
+      - type: word
+        part: header
+        words:
+          - "Content-Type"
