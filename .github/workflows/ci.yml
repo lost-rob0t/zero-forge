@@ -97,9 +97,9 @@ jobs:
 
       - name: Stage reference module
         run: |
-          mkdir -p /tmp/zeroforge-msf/modules/exploits/zeroforge
+          mkdir -p /tmp/zeroforge-msf/exploits/zeroforge
           cp zero_forge/llm_examples/metasploit/http_command_injection.rb \
-            /tmp/zeroforge-msf/modules/exploits/zeroforge/generated_validation.rb
+            /tmp/zeroforge-msf/exploits/zeroforge/generated_validation.rb
           cat > /tmp/zeroforge-msf/validate.rc <<'EOF'
           loadpath /workspace/zeroforge-msf
           use exploit/zeroforge/generated_validation
