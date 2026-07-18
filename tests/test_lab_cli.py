@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typer.testing import CliRunner
-
 import zero_forge.cli as cli
+from typer.testing import CliRunner
 from zero_forge.schemas import WorkflowState
 
 runner = CliRunner()
