@@ -48,12 +48,28 @@ def _layout(value: str) -> PurePosixPath:
     return path
 
 
+def _artifact_files(root: Path, artifact_type: ArtifactType) -> list[Path]:
+    if artifact_type == ArtifactType.METASPLOIT:
+        suffixes = (".rb",)
+    elif artifact_type in {ArtifactType.ZAP_ACTIVE, ArtifactType.ZAP_PASSIVE}:
+        suffixes = (".js",)
+    elif artifact_type == ArtifactType.NUCLEI:
+        suffixes = (".yaml", ".yml")
+    else:
+        raise LabError(f"Unsupported artifact type for promotion: {artifact_type.value}")
+    return sorted(
+        path
+        for suffix in suffixes
+        for path in root.rglob(f"*{suffix}")
+        if path.is_file()
+    )
+
+
 def _destinations(
     run_dir: Path, artifact_type: ArtifactType, msf_layout: PurePosixPath
 ) -> list[tuple[Path, PurePosixPath]]:
     root = run_dir / "zeroforge"
-    suffix = ".rb" if artifact_type == ArtifactType.METASPLOIT else ".js"
-    artifacts = sorted(path for path in root.rglob(f"*{suffix}") if path.is_file())
+    artifacts = _artifact_files(root, artifact_type)
     mapped: list[tuple[Path, PurePosixPath]] = []
     seen: set[PurePosixPath] = set()
     for artifact in artifacts:
@@ -61,8 +77,12 @@ def _destinations(
             rel = PurePosixPath("metasploit") / msf_layout / strip_poc_prefix(artifact.name)
         elif artifact_type == ArtifactType.ZAP_ACTIVE:
             rel = PurePosixPath("zap/active") / strip_poc_prefix(artifact.name)
-        else:
+        elif artifact_type == ArtifactType.ZAP_PASSIVE:
             rel = PurePosixPath("zap/passive") / strip_poc_prefix(artifact.name)
+        elif artifact_type == ArtifactType.NUCLEI:
+            rel = PurePosixPath("nuclei") / strip_poc_prefix(artifact.name)
+        else:
+            raise LabError(f"Unsupported artifact type for promotion: {artifact_type.value}")
         if rel in seen:
             raise LabError(f"Multiple artifacts map to the same promoted path: {rel}")
         seen.add(rel)
