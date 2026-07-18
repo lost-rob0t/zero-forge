@@ -53,3 +53,12 @@ def test_single_unstructured_poc_remains_supported():
     assert "print('single poc')" in result["text"]
     assert result["records"][0]["id"] == "inline:1"
     assert result["records"][0]["selected"] is True
+
+
+def test_long_section_is_truncated_at_an_explicit_boundary():
+    body = "\n".join(f"line-{index:04d}" for index in range(2000))
+    result = normalize_poc_context(body, max_chars=1000)
+
+    assert "PoC section truncated at a line boundary" in result["text"]
+    assert not result["text"].endswith("line-1999")
+    assert "truncated within per-section budget" in result["records"][0]["reason"]
