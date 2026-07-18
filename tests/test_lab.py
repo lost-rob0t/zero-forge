@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from zero_forge.lab import (
     LabError,
     LabWorkflowError,
