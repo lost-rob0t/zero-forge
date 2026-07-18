@@ -97,12 +97,19 @@ def artifact_root_counts(content: str, artifact_type: str) -> dict[str, int]:
 
 
 def require_single_artifact(content: str, artifact_type: str) -> dict[str, int]:
-    """Require exactly one complete root for Metasploit and ZAP artifacts.
-
-    Generic Python investigation artifacts do not have a framework root and pass
-    through with an empty root map.
-    """
+    """Require exactly one complete root for Metasploit and ZAP artifacts."""
     counts = artifact_root_counts(content, artifact_type)
+    if counts.get("MetasploitModule", 0) > 1:
+        raise ArtifactEditError(
+            "edit would concatenate multiple MetasploitModule roots; "
+            f"found {counts['MetasploitModule']}"
+        )
+    duplicate_zap = [name for name, count in counts.items() if count > 1]
+    if duplicate_zap:
+        raise ArtifactEditError(
+            "edit would concatenate multiple ZAP rule roots: "
+            + ", ".join(duplicate_zap)
+        )
     invalid = {name: count for name, count in counts.items() if count != 1}
     if invalid:
         details = ", ".join(f"{name}={count}" for name, count in invalid.items())
