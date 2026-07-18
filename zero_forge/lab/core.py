@@ -226,7 +226,12 @@ def get_lab_status(*, lab_root: str | Path | None, cve_id: str = "", name: str =
     scope = cve or sanitize_name(name)
     staged_root = root / "output" / scope
     runs = (
-        tuple(sorted((p for p in staged_root.iterdir() if p.is_dir()), reverse=True))
+        tuple(
+            sorted(
+                (p for p in staged_root.iterdir() if p.is_dir() and p.name != "latest"),
+                reverse=True,
+            )
+        )
         if staged_root.is_dir()
         else ()
     )
