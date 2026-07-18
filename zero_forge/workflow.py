@@ -7,7 +7,7 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from .agents.smart_agent import LLMCallError, generate_artifact, repair_artifact
+from .agents.artifact_workflow import LLMCallError, generate_artifact, repair_artifact
 from .agents.tool_agent import ToolAgent, ToolAgentError
 from .logging_config import get_logger
 from .schemas import ArtifactType, WorkflowError, WorkflowState
@@ -175,16 +175,17 @@ def save_artifact_node(state: WorkflowState) -> dict[str, Any]:
         return {"error": "Missing validation result", "status": "failed"}
     if not state.validation.is_valid:
         errors = (
-    "; ".join(state.validation.errors)
-    if state.validation.errors
-    else "Artifact failed validation"
-)
+            "; ".join(state.validation.errors)
+            if state.validation.errors
+            else "Artifact failed validation"
+        )
         return {"error": errors, "status": "failed"}
     if state.artifact is None:
         return {"error": "No artifact to save", "status": "failed"}
     if state.artifact.metadata.get("stub"):
         return {"error": "Refusing to save a stub artifact as completed", "status": "failed"}
     from .output import save_artifact
+
     output_path = save_artifact(state.artifact)
     logger.info("Artifact saved to %s", output_path)
     return {"output_path": output_path, "status": "completed"}
@@ -282,6 +283,7 @@ def run_workflow(vuln_input) -> WorkflowState:
     logger.info("Starting workflow")
     from .config import get_settings
     from .schemas import VulnerabilityInput
+
     if isinstance(vuln_input, dict):
         vuln_input = VulnerabilityInput(**vuln_input)
     initial_state = WorkflowState(
