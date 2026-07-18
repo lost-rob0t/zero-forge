@@ -89,6 +89,36 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
+  metasploit-load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Stage reference module
+        run: |
+          mkdir -p /tmp/zeroforge-msf/modules/exploits/zeroforge
+          cp zero_forge/llm_examples/metasploit/http_command_injection.rb \
+            /tmp/zeroforge-msf/modules/exploits/zeroforge/generated_validation.rb
+          cat > /tmp/zeroforge-msf/validate.rc <<'EOF'
+          loadpath /workspace/zeroforge-msf
+          use exploit/zeroforge/generated_validation
+          info
+          exit -y
+          EOF
+
+      - name: Load module with official Metasploit Framework image
+        run: |
+          docker run --rm \
+            --env MSF_UID=0 \
+            --env MSF_GID=0 \
+            --volume /tmp/zeroforge-msf:/workspace/zeroforge-msf:ro \
+            metasploitframework/metasploit-framework:latest \
+            ./msfconsole -q -r /workspace/zeroforge-msf/validate.rc \
+            | tee /tmp/zeroforge-msf-output.txt
+          grep -Fq 'Module: exploit/zeroforge/generated_validation' \
+            /tmp/zeroforge-msf-output.txt
+
   py314-install-smoke:
     runs-on: ubuntu-latest
     steps:
