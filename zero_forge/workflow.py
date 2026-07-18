@@ -293,7 +293,10 @@ def run_workflow(vuln_input) -> WorkflowState:
     try:
         if vuln_input.artifact_type == ArtifactType.METASPLOIT:
             require_ruby_runtime()
-        else:
+        elif vuln_input.artifact_type in {
+            ArtifactType.ZAP_ACTIVE,
+            ArtifactType.ZAP_PASSIVE,
+        }:
             require_node_runtime()
     except ValidatorRuntimeUnavailable as exc:
         message = str(exc)
