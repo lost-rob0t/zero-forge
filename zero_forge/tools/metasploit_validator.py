@@ -79,7 +79,7 @@ class DefaultMetasploitRunner:
         executable = self._resolve_executable()
         with tempfile.TemporaryDirectory(prefix="zeroforge-msf-") as root_text:
             root = Path(root_text)
-            module_path = root / "modules" / "exploits" / "zeroforge" / "generated_validation.rb"
+            module_path = root / "exploits" / "zeroforge" / "generated_validation.rb"
             module_path.parent.mkdir(parents=True)
             module_path.write_text(content, encoding="utf-8")
 
