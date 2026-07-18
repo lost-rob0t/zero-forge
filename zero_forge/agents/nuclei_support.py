@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from types import ModuleType
+from typing import Any
 
 from ..schemas import ArtifactType
 
 
-def register_nuclei_profile(smart_agent: ModuleType) -> None:
+def register_nuclei_profile(smart_agent: Any) -> None:
     """Register the Nuclei prompt contract on the shared Smart Agent module."""
     profiles = smart_agent._PROFILES
     if ArtifactType.NUCLEI in profiles:
