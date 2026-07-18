@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from zero_forge.tools.artifact_edit import (
     ArtifactEditError,
     apply_artifact_edits,
