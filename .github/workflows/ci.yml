@@ -29,7 +29,16 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Lint with ruff
-        run: uv run ruff check .
+        run: |
+          set -o pipefail
+          uv run ruff check . 2>&1 | tee ruff.log
+
+      - name: Upload Ruff diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ruff-diagnostics
+          path: ruff.log
 
   type-check:
     runs-on: ubuntu-latest
@@ -50,7 +59,16 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Type-check with mypy
-        run: uv run mypy zero_forge
+        run: |
+          set -o pipefail
+          uv run mypy zero_forge 2>&1 | tee mypy.log
+
+      - name: Upload mypy diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mypy-diagnostics
+          path: mypy.log
 
   test:
     runs-on: ubuntu-latest
@@ -80,7 +98,17 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Run tests
-        run: uv run pytest --cov=zero_forge --cov-report=xml --cov-report=term-missing
+        run: |
+          set -o pipefail
+          uv run pytest --cov=zero_forge --cov-report=xml --cov-report=term-missing \
+            2>&1 | tee pytest-${{ matrix.python-version }}.log
+
+      - name: Upload pytest diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-${{ matrix.python-version }}-diagnostics
+          path: pytest-${{ matrix.python-version }}.log
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
