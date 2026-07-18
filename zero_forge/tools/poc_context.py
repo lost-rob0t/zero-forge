@@ -144,7 +144,7 @@ def normalize_poc_context(
     records_by_id: dict[str, dict[str, Any]] = {}
 
     for section in ranked:
-        record = {
+        record: dict[str, Any] = {
             "id": section.identifier,
             "title": section.title,
             "source": section.source,
@@ -190,7 +190,10 @@ def normalize_poc_context(
         body, truncated = _truncate_section(section.content, per_section)
         record = records_by_id[section.identifier]
         if truncated:
-            record["reason"] += "; truncated within per-section budget"
+            record["reason"] = (
+                str(record.get("reason", ""))
+                + "; truncated within per-section budget"
+            )
         provenance = [f"ID: {section.identifier}"]
         if section.title:
             provenance.append(f"Title: {section.title}")
