@@ -190,7 +190,11 @@ def register_lab_commands(
             if dry_run:
                 console.print(planned)
                 return
-            result = collect_exploitdb(cve or query, planned, cve_id=cve)
+            result = collect_exploitdb(
+                cve or query,
+                planned,
+                cve_id=cve,
+            )
         except LabError as exc:
             console.print(f"[red]PoC collection failed:[/] {exc}")
             raise typer.Exit(code=1) from exc
