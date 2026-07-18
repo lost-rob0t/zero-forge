@@ -44,6 +44,7 @@ class ToolRegistry:
 def create_default_registry() -> ToolRegistry:
     """Create and populate a registry with the default built-in tools."""
     from .advisory_lookup import cisa_kev_lookup, github_advisory_search, osv_query
+    from .artifact_edit import apply_artifact_edits, diff_artifact_edits
     from .cve_lookup import cve_lookup
     from .exploit_workspace import (
         prepare_exploit_workspace,
@@ -52,6 +53,7 @@ def create_default_registry() -> ToolRegistry:
     )
     from .metasploit_validator import validate_metasploit_loadable
     from .output_bundle import publish_exploit_bundle
+    from .poc_context import normalize_poc_context
     from .source_inspect import git_diff_inspect, read_source_files, search_code
     from .validator import validate_zap_active_scan, validate_zap_passive_scan
     from .web_research import fetch_web_page, web_search
@@ -70,6 +72,9 @@ def create_default_registry() -> ToolRegistry:
     reg.register("read_source_files", read_source_files)
     reg.register("search_code", search_code)
     reg.register("git_diff_inspect", git_diff_inspect)
+    reg.register("normalize_poc_context", normalize_poc_context)
+    reg.register("diff_artifact_edits", diff_artifact_edits)
+    reg.register("apply_artifact_edits", apply_artifact_edits)
     reg.register("validate_metasploit", validate_metasploit_loadable)
     reg.register("validate_zap_active_scan", validate_zap_active_scan)
     reg.register("validate_zap_passive_scan", validate_zap_passive_scan)
