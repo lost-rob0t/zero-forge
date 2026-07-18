@@ -198,6 +198,7 @@ def run_lab(
         atomic_write_json(manifest_path, manifest)
         update_latest(scope_root, run_dir)
         raise LabWorkflowError(str(manifest["workflow_error"]), run_dir)
+    assert output_path is not None
     ensure_under(output_path, result_dir)
     manifest["status"] = "completed"
     manifest["output_path"] = str(output_path)
