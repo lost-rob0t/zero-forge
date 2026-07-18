@@ -52,6 +52,7 @@ def create_default_registry() -> ToolRegistry:
         write_exploit_draft,
     )
     from .metasploit_validator import validate_metasploit_loadable
+    from .nuclei_validator import validate_nuclei
     from .output_bundle import publish_exploit_bundle
     from .poc_context import normalize_poc_context
     from .source_inspect import git_diff_inspect, read_source_files, search_code
@@ -78,4 +79,5 @@ def create_default_registry() -> ToolRegistry:
     reg.register("validate_metasploit", validate_metasploit_loadable)
     reg.register("validate_zap_active_scan", validate_zap_active_scan)
     reg.register("validate_zap_passive_scan", validate_zap_passive_scan)
+    reg.register("validate_nuclei", validate_nuclei)
     return reg
