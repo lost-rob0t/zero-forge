@@ -98,7 +98,11 @@ def _normalize_context(
 
 
 def _rejection_comment(artifact_type: ArtifactType, message: str) -> str:
-    prefix = "#" if artifact_type == ArtifactType.METASPLOIT else "//"
+    prefix = (
+        "//"
+        if artifact_type in {ArtifactType.ZAP_ACTIVE, ArtifactType.ZAP_PASSIVE}
+        else "#"
+    )
     return f"{prefix} ZeroForge rejected generated artifact: {message}\n"
 
 

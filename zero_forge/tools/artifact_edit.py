@@ -8,6 +8,8 @@ import json
 import re
 from typing import Any
 
+import yaml
+
 _MAX_EDITS = 32
 
 
@@ -66,6 +68,16 @@ def parse_artifact_edit_plan(text: str) -> dict[str, Any]:
     return {"base_sha256": base_sha256, "edits": normalized}
 
 
+def _nuclei_document_count(content: str) -> int:
+    if not content.strip():
+        return 0
+    try:
+        return sum(1 for _document in yaml.safe_load_all(content))
+    except yaml.YAMLError:
+        # Let the dedicated validator report malformed YAML after the root guard.
+        return 1
+
+
 def artifact_root_counts(content: str, artifact_type: str) -> dict[str, int]:
     """Count required top-level roots for one supported artifact."""
     normalized = artifact_type.strip().lower()
@@ -99,11 +111,13 @@ def artifact_root_counts(content: str, artifact_type: str) -> dict[str, int]:
                 )
             ),
         }
+    if normalized == "nuclei":
+        return {"NucleiTemplate": _nuclei_document_count(content)}
     return {}
 
 
 def require_single_artifact(content: str, artifact_type: str) -> dict[str, int]:
-    """Require exactly one complete root for Metasploit and ZAP artifacts."""
+    """Require exactly one complete root for supported generated artifacts."""
     counts = artifact_root_counts(content, artifact_type)
     metasploit_count = counts.get("MetasploitModule", 0)
     if metasploit_count > 1:
@@ -112,7 +126,17 @@ def require_single_artifact(content: str, artifact_type: str) -> dict[str, int]:
             "multiple MetasploitModule roots; "
             f"MetasploitModule={metasploit_count}"
         )
-    duplicate_zap = [name for name, count in counts.items() if count > 1]
+    nuclei_count = counts.get("NucleiTemplate")
+    if nuclei_count is not None and nuclei_count > 1:
+        raise ArtifactEditError(
+            "artifact must contain exactly one complete root; edit would concatenate "
+            f"multiple Nuclei YAML documents; NucleiTemplate={nuclei_count}"
+        )
+    duplicate_zap = [
+        name
+        for name, count in counts.items()
+        if name != "NucleiTemplate" and count > 1
+    ]
     if duplicate_zap:
         details = ", ".join(f"{name}={counts[name]}" for name in duplicate_zap)
         raise ArtifactEditError(
