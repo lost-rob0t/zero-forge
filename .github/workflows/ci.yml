@@ -29,7 +29,16 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Lint with ruff
-        run: uv run ruff check .
+        run: |
+          set -o pipefail
+          uv run ruff check . 2>&1 | tee ruff.log
+
+      - name: Upload Ruff diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ruff-diagnostics-pr-132
+          path: ruff.log
 
   type-check:
     runs-on: ubuntu-latest
