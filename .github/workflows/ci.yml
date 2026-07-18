@@ -30,13 +30,16 @@ jobs:
 
       - name: Lint with ruff
         run: |
-          set -o pipefail
+          set +e
           uv run ruff check . --fix 2>&1 | tee ruff.log
+          ruff_status=${PIPESTATUS[0]}
+          set -e
           git diff -- . > ruff-fixes.patch
           if [[ -s ruff-fixes.patch ]]; then
             cat ruff-fixes.patch
             exit 1
           fi
+          exit "$ruff_status"
 
       - name: Upload Ruff diagnostics
         if: failure()
