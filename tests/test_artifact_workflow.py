@@ -87,7 +87,7 @@ def test_generation_rejects_concatenated_artifact(monkeypatch):
     )
 
     assert artifact.metadata["generation_rejected"] is True
-    assert "exactly one complete root" in artifact.metadata["generation_error"]
+    assert "multiple MetasploitModule" in artifact.metadata["generation_error"]
     assert "class MetasploitModule" not in artifact.content
 
 
