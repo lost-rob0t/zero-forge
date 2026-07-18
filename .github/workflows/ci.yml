@@ -31,14 +31,21 @@ jobs:
       - name: Lint with ruff
         run: |
           set -o pipefail
-          uv run ruff check . 2>&1 | tee ruff.log
+          uv run ruff check . --fix 2>&1 | tee ruff.log
+          git diff -- . > ruff-fixes.patch
+          if [[ -s ruff-fixes.patch ]]; then
+            cat ruff-fixes.patch
+            exit 1
+          fi
 
       - name: Upload Ruff diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: ruff-diagnostics
-          path: ruff.log
+          path: |
+            ruff.log
+            ruff-fixes.patch
 
   type-check:
     runs-on: ubuntu-latest
