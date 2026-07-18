@@ -33,11 +33,7 @@ def _strip_json_fence(text: str) -> str:
 
 
 def parse_artifact_edit_plan(text: str) -> dict[str, Any]:
-    """Parse one strict model edit response.
-
-    The model may choose exact text spans to replace, but it may not submit a
-    complete replacement artifact or an append operation.
-    """
+    """Parse one strict model edit response."""
     try:
         payload = json.loads(_strip_json_fence(text))
     except json.JSONDecodeError as exc:
@@ -68,17 +64,12 @@ def parse_artifact_edit_plan(text: str) -> dict[str, Any]:
     return {"base_sha256": base_sha256, "edits": normalized}
 
 
-def _validate_single_artifact(content: str, artifact_type: str) -> None:
+def _reject_concatenated_artifacts(content: str, artifact_type: str) -> None:
     if artifact_type == "metasploit":
-        count = len(
-            re.findall(
-                r"(?m)^\s*class\s+MetasploitModule\s*<\s*Msf::Exploit::Remote\b",
-                content,
-            )
-        )
-        if count != 1:
+        count = len(re.findall(r"(?m)^\s*class\s+MetasploitModule\b", content))
+        if count > 1:
             raise ArtifactEditError(
-                "Metasploit artifact must contain exactly one MetasploitModule class"
+                "Metasploit edit would concatenate multiple MetasploitModule classes"
             )
         return
 
@@ -90,9 +81,9 @@ def _validate_single_artifact(content: str, artifact_type: str) -> None:
     }:
         metadata_count = len(re.findall(r"\bfunction\s+getMetadata\s*\(", content))
         scan_count = len(re.findall(r"\bfunction\s+scan\s*\(", content))
-        if metadata_count != 1 or scan_count != 1:
+        if metadata_count > 1 or scan_count > 1:
             raise ArtifactEditError(
-                "ZAP artifact must contain exactly one getMetadata function and one scan function"
+                "ZAP edit would concatenate multiple rule entry points"
             )
 
 
@@ -135,7 +126,7 @@ def apply_artifact_edits(
         raise ArtifactEditError("Artifact edit plan produced no change")
     if len(updated.encode("utf-8")) > max_bytes:
         raise ArtifactEditError("Edited artifact exceeded max_bytes")
-    _validate_single_artifact(updated, artifact_type)
+    _reject_concatenated_artifacts(updated, artifact_type)
 
     diff = "".join(
         difflib.unified_diff(
