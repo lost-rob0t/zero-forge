@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from zero_forge.tools.metasploit_validator import (
-    validate_metasploit_with_runners,
-)
-
+from zero_forge.tools.metasploit_validator import validate_metasploit_with_runners
 
 MODULE = """class MetasploitModule < Msf::Exploit::Remote
   def initialize(info = {})
