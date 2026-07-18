@@ -32,10 +32,12 @@ BROKEN_LANGFLOW_MODULE = (
 ).read_text(encoding="utf-8")
 
 VALID_AST: dict[str, Any] = {
+    "parseable": True,
     "has_metasploit_module_class": True,
     "has_metasploit_superclass": True,
     "has_initialize_method": True,
     "has_exploit_method": True,
+    "metadata_keys_found": ["Name", "Description", "Author", "References", "License"],
 }
 
 
