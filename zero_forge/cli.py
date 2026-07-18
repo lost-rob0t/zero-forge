@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import ensure_default_config, get_settings
+from .lab_cli import register_lab_commands
 from .logging_config import setup_logging_from_settings
 from .schemas import ArtifactType, ToolRequest, VulnerabilityInput, WorkflowState
 from .workflow import run_workflow
@@ -36,11 +37,7 @@ _ARTIFACT_TYPE_OPTION = cast(
 )
 _WEB_QUERIES_OPTION = cast(
     list[str],
-    typer.Option(
-        [],
-        "--web-query",
-        help="Repeat for multiple bounded research queries",
-    ),
+    typer.Option([], "--web-query", help="Repeat for multiple bounded research queries"),
 )
 _OUTPUT_FORMATS_OPTION = cast(
     list[str],
@@ -108,15 +105,12 @@ def _apply_env_overrides(*, output_dir: str, unsafe: bool, config_file: str) -> 
 
         os.environ["ZERO_FORGE_CONFIG_PATH"] = config_file
         get_settings(reload=True)
-
     get_settings()
-
     if unsafe:
         import os
 
         os.environ["ZERO_FORGE_UNSAFE_SOURCE"] = "true"
         get_settings(reload=True)
-
     if output_dir:
         import os
 
@@ -131,7 +125,6 @@ def _print_result_table(results: list[tuple[ArtifactType, WorkflowState]]) -> No
     table.add_column("Valid")
     table.add_column("Output")
     table.add_column("Errors")
-
     for artifact_type, result in results:
         valid = str(result.validation.is_valid) if result.validation else "—"
         errors = (
@@ -146,7 +139,6 @@ def _print_result_table(results: list[tuple[ArtifactType, WorkflowState]]) -> No
             result.output_path or "—",
             errors or "—",
         )
-
     console.print(table)
     for artifact_type, result in results:
         if result.output_path:
@@ -203,11 +195,7 @@ def _source_snapshots(source_path: str, unsafe: bool) -> list[SourceSnapshot]:
             content=str(item.get("content", "")),
         )
         for item in raw
-        if (
-            isinstance(item, dict)
-            and not item.get("skipped")
-            and not item.get("truncated")
-        )
+        if isinstance(item, dict) and not item.get("skipped") and not item.get("truncated")
     ]
 
 
@@ -221,45 +209,20 @@ def generate(
     ),
     artifact_type: ArtifactType = _ARTIFACT_TYPE_OPTION,
     all_types: bool = typer.Option(
-        False,
-        "--all",
-        help="Generate artifacts for every supported type (overrides --type)",
+        False, "--all", help="Generate artifacts for every supported type (overrides --type)"
     ),
-    poc_file: str = typer.Option(
-        "",
-        "--poc",
-        "-p",
-        help="Path to proof-of-concept file",
-    ),
+    poc_file: str = typer.Option("", "--poc", "-p", help="Path to proof-of-concept file"),
     writeup_file: str = typer.Option(
-        "",
-        "--writeup",
-        "-w",
-        help="Path to vulnerability write-up",
+        "", "--writeup", "-w", help="Path to vulnerability write-up"
     ),
     source_path: str = typer.Option(
-        "",
-        "--source",
-        "-s",
-        help="Path to vulnerable source code",
+        "", "--source", "-s", help="Path to vulnerable source code"
     ),
-    patch_file: str = typer.Option(
-        "",
-        "--patch",
-        "-d",
-        help="Path to patch/diff file",
-    ),
+    patch_file: str = typer.Option("", "--patch", "-d", help="Path to patch/diff file"),
     output_dir: str = typer.Option(
-        "",
-        "--output",
-        "-o",
-        help="Output directory (overrides config)",
+        "", "--output", "-o", help="Output directory (overrides config)"
     ),
-    config_file: str = typer.Option(
-        "",
-        "--config",
-        help="Path to YAML config file",
-    ),
+    config_file: str = typer.Option("", "--config", help="Path to YAML config file"),
     unsafe: bool = typer.Option(
         False,
         "--unsafe",
@@ -270,15 +233,12 @@ def generate(
     _ensure_config(config_file)
     _apply_env_overrides(output_dir=output_dir, unsafe=unsafe, config_file=config_file)
     setup_logging_from_settings()
-
     label = cve_id or "source-only analysis (no CVE)"
     console.print(f"[bold]ZeroForge[/] — generating artifact(s) for {label}")
-
     poc_text = _read(poc_file)
     writeup_text = _read(writeup_file)
     patch_diff = _read(patch_file)
     types_to_run = list[ArtifactType](ArtifactType) if all_types else [artifact_type]
-
     results: list[tuple[ArtifactType, WorkflowState]] = []
     for at in types_to_run:
         console.print(f"\n[cyan]→ {at.value}[/]")
@@ -293,22 +253,19 @@ def generate(
             )
         )
         results.append((at, result))
-
     console.print()
     _print_result_table(results)
+    if any(result.status != "completed" for _, result in results):
+        raise typer.Exit(code=1)
 
 
 @app.command("draft")
 def draft_exploit(
     candidate_file: str = typer.Option(
-        ...,
-        "--candidate",
-        help="Path to CandidateFinding JSON",
+        ..., "--candidate", help="Path to CandidateFinding JSON"
     ),
     hypothesis_file: str = typer.Option(
-        ...,
-        "--hypothesis",
-        help="Path to SecurityHypothesis JSON",
+        ..., "--hypothesis", help="Path to SecurityHypothesis JSON"
     ),
     artifact_type: str = typer.Option(
         "metasploit",
@@ -317,23 +274,15 @@ def draft_exploit(
         help="metasploit, python, zap_active, or zap_passive",
     ),
     source_path: str = typer.Option(
-        "",
-        "--source",
-        "-s",
-        help="Optional authorized source tree",
+        "", "--source", "-s", help="Optional authorized source tree"
     ),
     web_queries: list[str] = _WEB_QUERIES_OPTION,
     output_formats: list[str] = _OUTPUT_FORMATS_OPTION,
     all_formats: bool = typer.Option(
-        False,
-        "--all-formats",
-        help="Emit Markdown, Org, and JSON reports",
+        False, "--all-formats", help="Emit Markdown, Org, and JSON reports"
     ),
     output_dir: str = typer.Option(
-        "",
-        "--output",
-        "-o",
-        help="Output directory (overrides config)",
+        "", "--output", "-o", help="Output directory (overrides config)"
     ),
     max_iterations: int = typer.Option(
         4,
@@ -343,15 +292,9 @@ def draft_exploit(
         help="Maximum Smart Agent repair iterations",
     ),
     authorized: bool = typer.Option(
-        False,
-        "--authorized",
-        help="Confirm that this investigation is explicitly authorized",
+        False, "--authorized", help="Confirm that this investigation is explicitly authorized"
     ),
-    config_file: str = typer.Option(
-        "",
-        "--config",
-        help="Path to YAML config file",
-    ),
+    config_file: str = typer.Option("", "--config", help="Path to YAML config file"),
     unsafe: bool = typer.Option(
         False,
         "--unsafe",
@@ -359,9 +302,7 @@ def draft_exploit(
     ),
 ) -> None:
     """Iteratively draft and validate an exploit artifact, then publish its bundle."""
-    from .discovery.exploit_loop import (
-        ArtifactType as DraftArtifactType,
-    )
+    from .discovery.exploit_loop import ArtifactType as DraftArtifactType
     from .discovery.exploit_loop import (
         ExploitIterationRequest,
         OutputFormat,
@@ -371,11 +312,9 @@ def draft_exploit(
 
     if not authorized:
         raise typer.BadParameter("--authorized is required")
-
     _ensure_config(config_file)
     _apply_env_overrides(output_dir=output_dir, unsafe=unsafe, config_file=config_file)
     setup_logging_from_settings()
-
     candidate = CandidateFinding.model_validate_json(_read(candidate_file))
     hypothesis = SecurityHypothesis.model_validate_json(_read(hypothesis_file))
     formats = _resolve_output_formats(output_formats, all_formats)
@@ -392,7 +331,6 @@ def draft_exploit(
             output_formats=[cast(OutputFormat, value) for value in formats],
         )
     )
-
     table = Table(title="Exploit Draft Result")
     table.add_column("Status")
     table.add_column("Formats")
@@ -420,8 +358,8 @@ def tools() -> None:
     table = Table(title="Registered Tools")
     table.add_column("Name", style="cyan")
     table.add_column("Index")
-    for i, name in enumerate(agent.list_available_tools(), 1):
-        table.add_row(name, str(i))
+    for index, name in enumerate(agent.list_available_tools(), 1):
+        table.add_row(name, str(index))
     console.print(table)
 
 
@@ -429,10 +367,7 @@ def tools() -> None:
 def validate(
     file: str = typer.Argument(..., help="Path to artifact file"),
     artifact_type: str = typer.Option(
-        "metasploit",
-        "--type",
-        "-t",
-        help="Artifact type",
+        "metasploit", "--type", "-t", help="Artifact type"
     ),
 ) -> None:
     """Validate an existing artifact file."""
@@ -440,7 +375,6 @@ def validate(
 
     content = Path(file).read_text(encoding="utf-8", errors="replace")
     result = ToolAgent().validate_artifact(content, artifact_type)
-
     if result.is_valid:
         console.print("[green]✓ Artifact is valid[/]")
     else:
@@ -450,6 +384,8 @@ def validate(
     for warn in result.warnings:
         console.print(f"  [yellow]![/] {warn}")
 
+
+register_lab_commands(app, console, _ensure_config, _apply_env_overrides)
 
 if __name__ == "__main__":
     app()
