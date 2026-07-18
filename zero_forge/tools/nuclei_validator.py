@@ -118,7 +118,8 @@ def _validate_schema(template: dict[str, Any]) -> tuple[list[str], list[str], li
         severity = str(info.get("severity", "")).lower()
         if severity not in _NUCLEI_SEVERITIES:
             errors.append(
-                "Nuclei template info.severity must be info, low, medium, high, critical, or unknown"
+                "Nuclei template info.severity must be info, low, medium, high, "
+                "critical, or unknown"
             )
         if not _nonempty_string(info.get("description")):
             warnings.append("Add info.description to explain the detection evidence")
@@ -133,7 +134,10 @@ def _validate_schema(template: dict[str, Any]) -> tuple[list[str], list[str], li
                 and all(_nonempty_string(item) for item in references)
             )
         ):
-            errors.append("Nuclei template info.reference must be a string or non-empty string list")
+            errors.append(
+                "Nuclei template info.reference must be a string or non-empty "
+                "string list"
+            )
 
     protocols = sorted(key for key in _NUCLEI_PROTOCOL_KEYS if key in template)
     if not protocols:
