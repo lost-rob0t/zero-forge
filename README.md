@@ -69,6 +69,7 @@ Two models. Hard role separation.
 - Ruby **3.3.8** for Metasploit validation
 - An OpenRouter, OpenAI, or Anthropic API key
 - Optional Brave Search or Tavily API key for public web research
+- Optional `searchsploit` for native lab PoC acquisition
 
 ```bash
 git clone https://github.com/lost-rob0t/zero-forge.git
@@ -132,6 +133,45 @@ uv run zero-forge validate exploit.rb
 uv run zero-forge validate active-rule.js --type zap_active_scan
 uv run zero-forge validate passive-rule.js --type zap_passive_scan
 ```
+
+## Native source lab
+
+The `lab` command group replaces the external `zf-lab` wrapper with a manifest-backed workflow inside ZeroForge. It verifies existing Git remotes, rejects dirty checkouts, resolves refs to immutable commits, records source and harness identities, and returns a nonzero exit when generation fails.
+
+Run source-only analysis at an exact commit:
+
+```bash
+uv run zero-forge lab run \
+  --repo https://github.com/langflow-ai/langflow.git \
+  --ref e1ee081d3223bd2150425ddb9487b5e9f4ccff26
+```
+
+Use an explicit source label and SearchSploit query:
+
+```bash
+uv run zero-forge lab run \
+  --repo https://github.com/langflow-ai/langflow.git \
+  --name langflow-e1ee081d \
+  --query langflow \
+  --ref e1ee081d3223bd2150425ddb9487b5e9f4ccff26
+```
+
+Collect raw Exploit-DB evidence without generation:
+
+```bash
+uv run zero-forge lab poc --query langflow --output ./evidence
+```
+
+Inspect a source-only scope, then promote a reviewed completed run:
+
+```bash
+uv run zero-forge lab status --name langflow-e1ee081d
+uv run zero-forge lab promote --run /path/to/lab/output/langflow-e1ee081d/<run-id>
+```
+
+The lab root defaults to `$AI_HACKING_LAB` or `~/Documents/AI/hacking`; use `--lab-root` to override it. Each run contains `run.json`, raw PoC evidence, generated artifacts, and an atomic `latest` link. Promotion supports Metasploit, ZAP active, and ZAP passive artifacts, refuses empty bundles, and uses staged replacement with `--force`.
+
+Use `--no-exploitdb` when SearchSploit is unavailable or raw PoC collection is not needed. Use `--dry-run` on `lab run`, `lab poc`, or `lab promote` to inspect resolved paths without mutation.
 
 ## Seeded discovery and iterative drafting
 
@@ -245,13 +285,15 @@ ZeroForge is built to fail closed:
 zero_forge/
 ├── agents/          smart and tool role implementations
 ├── discovery/       seeded analysis and iterative exploit drafting
+├── lab/             native source acquisition, run staging, and promotion
 ├── tools/           allowlisted research, workspace, publishing, and validation tools
 ├── llm_examples/    bounded Metasploit and ZAP references
 ├── workflow.py      LangGraph orchestration and repair loop
 ├── schemas.py       typed state, input, and artifact contracts
 ├── examples.py      artifact-specific example loading
 ├── output.py        contained filesystem writes
-└── cli.py           Typer command line interface
+├── lab_cli.py       native lab Typer command group
+└── cli.py           primary Typer command line interface
 ```
 
 ## Development
