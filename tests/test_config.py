@@ -43,10 +43,10 @@ def clean_env(monkeypatch):
 
 def test_defaults(clean_env):
     settings = load_config()
-    assert settings.models.smart.model == "gpt-4o"
+    assert settings.models.smart.model == "openai/gpt-4o"
     assert settings.models.smart.temperature == 0.3
     assert settings.models.smart.max_tokens == 4096
-    assert settings.models.tool.model == "gpt-4o-mini"
+    assert settings.models.tool.model == "openai/gpt-4o-mini"
     assert settings.models.tool.temperature == 0.0
     assert settings.models.tool.max_tokens == 1024
     assert settings.llm.stub_mode is False
@@ -106,7 +106,7 @@ def test_yaml_partial_model_uses_role_defaults(tmp_path, clean_env):
     settings = load_config(config_path)
     assert settings.models.smart.model == "custom-smart"
     assert settings.models.smart.temperature == 0.3
-    assert settings.models.tool.model == "gpt-4o-mini"
+    assert settings.models.tool.model == "openai/gpt-4o-mini"
 
 
 def test_legacy_yaml_fails_with_migration_message(tmp_path, clean_env):

@@ -15,7 +15,7 @@
 models:
   smart:
     provider: "auto"            # auto, openrouter, openai, or anthropic
-    model: "gpt-4o"             # reasoning and artifact-writing model
+    model: "openai/gpt-4o"      # reasoning and artifact-writing model
     temperature: 0.3
     max_tokens: 4096
     auto_max_tokens: true       # infer max_tokens from provider API
@@ -24,7 +24,7 @@ models:
 
   tool:
     provider: "auto"            # independently resolved provider
-    model: "gpt-4o-mini"        # cheap/fast registered-tool caller
+    model: "openai/gpt-4o-mini" # cheap/fast registered-tool caller
     temperature: 0.0
     max_tokens: 1024
     auto_max_tokens: true       # infer max_tokens from provider API

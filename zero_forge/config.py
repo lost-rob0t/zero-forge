@@ -18,7 +18,7 @@ class ModelConfig(BaseModel):
     """Configuration for one model role."""
 
     provider: Literal["auto", "openrouter", "openai", "anthropic"] = "auto"
-    model: str = Field(default="gpt-4o", min_length=1)
+    model: str = Field(default="openai/gpt-4o", min_length=1)
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, ge=1)
     auto_max_tokens: bool = Field(
@@ -42,7 +42,7 @@ class SmartModelConfig(ModelConfig):
 class ToolModelConfig(ModelConfig):
     """Tool Agent defaults."""
 
-    model: str = Field(default="gpt-4o-mini", min_length=1)
+    model: str = Field(default="openai/gpt-4o-mini", min_length=1)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     max_tokens: int = Field(default=1024, ge=1)
 

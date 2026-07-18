@@ -10,9 +10,10 @@ import pytest
 from zero_forge.agents.llm import (
     call_model,
     reset_model_limits_cache,
+    resolve_model,
     resolve_model_limits,
 )
-from zero_forge.config import ModelConfig, reset_settings
+from zero_forge.config import ModelConfig, get_settings, reset_settings
 
 
 @pytest.fixture(autouse=True)
@@ -96,6 +97,18 @@ def test_reset_model_limits_cache_clears(clean_env, monkeypatch):
         resolve_model_limits("openrouter/z-ai/glm-5.2", "openrouter", "sk-test")
 
     assert m.call_count == 2
+
+
+def test_default_models_include_upstream_provider_for_openrouter(clean_env, monkeypatch):
+    """Default role models must resolve to valid OpenRouter model identifiers."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    settings = get_settings(reload=True)
+
+    smart = resolve_model("smart", settings.models.smart)
+    tool = resolve_model("tool", settings.models.tool)
+
+    assert smart.model == "openrouter/openai/gpt-4o"
+    assert tool.model == "openrouter/openai/gpt-4o-mini"
 
 
 # --- call_model auto-inference integration ---
