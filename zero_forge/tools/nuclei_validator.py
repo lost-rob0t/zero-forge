@@ -174,7 +174,7 @@ def validate_nuclei(
         }
 
     try:
-        documents = [document for document in yaml.safe_load_all(content) if document is not None]
+        documents = list(yaml.safe_load_all(content))
     except yaml.YAMLError as exc:
         return {
             "is_valid": False,
