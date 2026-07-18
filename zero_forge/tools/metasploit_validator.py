@@ -41,6 +41,7 @@ _BASE64_TRANSPORT_PATTERN = re.compile(
 _SHELL_CHECK_PATTERN = re.compile(
     r"(?m)^\s*(?:check_)?(?:cmd|code)\s*=\s*['\"](?:echo|id|whoami|uname|printf)\b"
 )
+_MODULE_CLASS_PATTERN = re.compile(r"(?m)^\s*class\s+MetasploitModule\b")
 
 
 @runtime_checkable
@@ -122,6 +123,13 @@ def _semantic_errors(content: str) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     check_body = _method_body(content, "check")
+
+    module_count = len(_MODULE_CLASS_PATTERN.findall(content))
+    if module_count != 1:
+        errors.append(
+            "module must contain exactly one MetasploitModule class declaration; "
+            f"found {module_count}, which indicates concatenated artifacts"
+        )
 
     if "Msf::Exploit::Remote::AutoCheck" in content and not check_body:
         errors.append("AutoCheck is prepended but the module does not define a check method")
