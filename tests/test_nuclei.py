@@ -129,11 +129,14 @@ def test_validate_nuclei_skips_optional_binary_when_unavailable(monkeypatch) -> 
 def test_validate_nuclei_rejects_invalid_yaml_and_multiple_documents() -> None:
     invalid = validate_nuclei("id: [unterminated")
     multiple = validate_nuclei(VALID_TEMPLATE + "\n---\n" + VALID_TEMPLATE)
+    empty_extra = validate_nuclei(VALID_TEMPLATE + "\n---\n")
 
     assert invalid["is_valid"] is False
     assert any("Invalid Nuclei YAML" in error for error in invalid["errors"])
     assert multiple["is_valid"] is False
     assert multiple["errors"] == ["Nuclei artifact must contain exactly one YAML document"]
+    assert empty_extra["is_valid"] is False
+    assert empty_extra["evidence"]["document_count"] == 2
 
 
 def test_validate_nuclei_requires_detection_schema() -> None:
@@ -184,6 +187,14 @@ def test_nuclei_repair_cannot_concatenate_a_second_yaml_document() -> None:
             VALID_TEMPLATE,
             artifact_sha256(VALID_TEMPLATE),
             [{"old": VALID_TEMPLATE, "new": VALID_TEMPLATE + "\n---\n" + VALID_TEMPLATE}],
+            artifact_type="nuclei",
+        )
+
+    with pytest.raises(ArtifactEditError, match="multiple Nuclei YAML documents"):
+        apply_artifact_edits(
+            VALID_TEMPLATE,
+            artifact_sha256(VALID_TEMPLATE),
+            [{"old": VALID_TEMPLATE, "new": VALID_TEMPLATE + "\n---\n"}],
             artifact_type="nuclei",
         )
 
