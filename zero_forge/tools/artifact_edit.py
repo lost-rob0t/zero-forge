@@ -64,27 +64,52 @@ def parse_artifact_edit_plan(text: str) -> dict[str, Any]:
     return {"base_sha256": base_sha256, "edits": normalized}
 
 
-def _reject_concatenated_artifacts(content: str, artifact_type: str) -> None:
-    if artifact_type == "metasploit":
-        count = len(re.findall(r"(?m)^\s*class\s+MetasploitModule\b", content))
-        if count > 1:
-            raise ArtifactEditError(
-                "Metasploit edit would concatenate multiple MetasploitModule classes"
+def artifact_root_counts(content: str, artifact_type: str) -> dict[str, int]:
+    """Count required top-level roots for one supported artifact."""
+    normalized = artifact_type.strip().lower()
+    if normalized == "metasploit":
+        return {
+            "MetasploitModule": len(
+                re.findall(r"(?m)^\s*class\s+MetasploitModule\b", content)
             )
-        return
+        }
+    if normalized in {"zap_active_scan", "zap_active"}:
+        return {
+            "getMetadata": len(re.findall(r"\bfunction\s+getMetadata\s*\(", content)),
+            "scan": len(
+                re.findall(
+                    r"\bfunction\s+scan\s*\(\s*as\s*,\s*msg\s*,\s*param\s*,\s*value\s*\)",
+                    content,
+                )
+            ),
+        }
+    if normalized in {"zap_passive_scan", "zap_passive"}:
+        return {
+            "getMetadata": len(re.findall(r"\bfunction\s+getMetadata\s*\(", content)),
+            "scan": len(
+                re.findall(
+                    r"\bfunction\s+scan\s*\(\s*ps\s*,\s*msg\s*,\s*src\s*\)",
+                    content,
+                )
+            ),
+        }
+    return {}
 
-    if artifact_type in {
-        "zap_active_scan",
-        "zap_active",
-        "zap_passive_scan",
-        "zap_passive",
-    }:
-        metadata_count = len(re.findall(r"\bfunction\s+getMetadata\s*\(", content))
-        scan_count = len(re.findall(r"\bfunction\s+scan\s*\(", content))
-        if metadata_count > 1 or scan_count > 1:
-            raise ArtifactEditError(
-                "ZAP edit would concatenate multiple rule entry points"
-            )
+
+def require_single_artifact(content: str, artifact_type: str) -> dict[str, int]:
+    """Require exactly one complete root for Metasploit and ZAP artifacts.
+
+    Generic Python investigation artifacts do not have a framework root and pass
+    through with an empty root map.
+    """
+    counts = artifact_root_counts(content, artifact_type)
+    invalid = {name: count for name, count in counts.items() if count != 1}
+    if invalid:
+        details = ", ".join(f"{name}={count}" for name, count in invalid.items())
+        raise ArtifactEditError(
+            "artifact must contain exactly one complete root; " + details
+        )
+    return counts
 
 
 def apply_artifact_edits(
@@ -112,21 +137,30 @@ def apply_artifact_edits(
     plan = parse_artifact_edit_plan(
         json.dumps({"base_sha256": base_sha256, "edits": edits})
     )
+    normalized_edits = plan["edits"]
+    if not isinstance(normalized_edits, list):
+        raise ArtifactEditError("normalized edit plan is invalid")
+
     updated = content
-    for index, edit in enumerate(plan["edits"], start=1):
-        old = edit["old"]
+    for index, edit in enumerate(normalized_edits, start=1):
+        if not isinstance(edit, dict):
+            raise ArtifactEditError(f"edit {index} is invalid")
+        old = edit.get("old")
+        new = edit.get("new")
+        if not isinstance(old, str) or not isinstance(new, str):
+            raise ArtifactEditError(f"edit {index} old and new must be strings")
         occurrences = updated.count(old)
         if occurrences != 1:
             raise ArtifactEditError(
                 f"edit {index} old text must occur exactly once; found {occurrences}"
             )
-        updated = updated.replace(old, edit["new"], 1)
+        updated = updated.replace(old, new, 1)
 
     if updated == content:
         raise ArtifactEditError("Artifact edit plan produced no change")
     if len(updated.encode("utf-8")) > max_bytes:
         raise ArtifactEditError("Edited artifact exceeded max_bytes")
-    _reject_concatenated_artifacts(updated, artifact_type)
+    roots = require_single_artifact(updated, artifact_type)
 
     diff = "".join(
         difflib.unified_diff(
@@ -141,7 +175,8 @@ def apply_artifact_edits(
         "base_sha256": actual_sha256,
         "sha256": artifact_sha256(updated),
         "diff": diff,
-        "applied_edits": len(plan["edits"]),
+        "applied_edits": len(normalized_edits),
+        "artifact_roots": roots,
     }
 
 
