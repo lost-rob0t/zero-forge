@@ -64,6 +64,7 @@ class VulnerabilityInput(BaseModel):
             raise ValueError("CVE ID must be a string")
         return normalize_cve_id(value)
 
+
 class SourceFile(BaseModel):
     """A single source file inspected by the harness."""
 
@@ -140,6 +141,8 @@ class ValidationResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     runtime_error: bool = False
+    stages: dict[str, str] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolRequest(StrictSchema):
