@@ -105,16 +105,19 @@ def artifact_root_counts(content: str, artifact_type: str) -> dict[str, int]:
 def require_single_artifact(content: str, artifact_type: str) -> dict[str, int]:
     """Require exactly one complete root for Metasploit and ZAP artifacts."""
     counts = artifact_root_counts(content, artifact_type)
-    if counts.get("MetasploitModule", 0) > 1:
+    metasploit_count = counts.get("MetasploitModule", 0)
+    if metasploit_count > 1:
         raise ArtifactEditError(
-            "edit would concatenate multiple MetasploitModule roots; "
-            f"found {counts['MetasploitModule']}"
+            "artifact must contain exactly one complete root; edit would concatenate "
+            "multiple MetasploitModule roots; "
+            f"MetasploitModule={metasploit_count}"
         )
     duplicate_zap = [name for name, count in counts.items() if count > 1]
     if duplicate_zap:
+        details = ", ".join(f"{name}={counts[name]}" for name in duplicate_zap)
         raise ArtifactEditError(
-            "edit would concatenate multiple ZAP rule roots: "
-            + ", ".join(duplicate_zap)
+            "artifact must contain exactly one complete root; edit would concatenate "
+            f"multiple ZAP rule roots; {details}"
         )
     invalid = {name: count for name, count in counts.items() if count != 1}
     if invalid:
