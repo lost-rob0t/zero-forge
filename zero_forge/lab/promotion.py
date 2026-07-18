@@ -10,6 +10,7 @@ import shutil
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 from ..schemas import ArtifactType
 from .types import LabError
@@ -31,7 +32,7 @@ def read_manifest(run_dir: Path) -> dict[str, object]:
         raise LabError(f"Invalid or missing run manifest: {run_dir}") from exc
     if not isinstance(payload, dict):
         raise LabError("Run manifest must be a JSON object")
-    return payload
+    return cast(dict[str, object], payload)
 
 
 def strip_poc_prefix(filename: str) -> str:
