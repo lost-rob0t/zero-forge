@@ -66,7 +66,7 @@ def test_generation_normalizes_poc_and_records_decisions(monkeypatch):
     assert "exploitdb:52262" not in normalized
     assert "CVE-2026-0770" not in normalized
     assert artifact.metadata["poc_selection"]
-    assert artifact.metadata["artifact_root_count"] == 1
+    assert artifact.metadata["artifact_roots"] == {"MetasploitModule": 1}
 
 
 def test_generation_rejects_concatenated_artifact(monkeypatch):
@@ -89,6 +89,27 @@ def test_generation_rejects_concatenated_artifact(monkeypatch):
     assert artifact.metadata["generation_rejected"] is True
     assert "exactly one complete root" in artifact.metadata["generation_error"]
     assert "class MetasploitModule" not in artifact.content
+
+
+def test_generation_rejects_incomplete_zap_rule(monkeypatch):
+    monkeypatch.setattr(
+        artifact_workflow.legacy,
+        "generate_artifact",
+        lambda *_args: Artifact(
+            artifact_type=ArtifactType.ZAP_ACTIVE,
+            content="function scan(as, msg, param, value) {}",
+            filename="test.js",
+            metadata={"stub": False},
+        ),
+    )
+
+    artifact = artifact_workflow.generate_artifact(
+        VulnerabilityInput(cve_id="", artifact_type=ArtifactType.ZAP_ACTIVE),
+        CollectedContext(cve_id=""),
+    )
+
+    assert artifact.metadata["generation_rejected"] is True
+    assert "getMetadata=0" in artifact.metadata["generation_error"]
 
 
 def test_repair_applies_sha_pinned_edit_plan(monkeypatch):
