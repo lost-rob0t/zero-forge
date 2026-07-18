@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-import re
-from typing import Any
+from typing import Any, cast
 
+from ..config import get_settings
 from ..logging_config import get_logger
 from ..schemas import (
     Artifact,
@@ -19,17 +19,19 @@ from ..tools.artifact_edit import (
     ArtifactEditError,
     artifact_sha256,
     parse_artifact_edit_plan,
+    require_single_artifact,
 )
 from ..tools.poc_context import normalize_poc_context
 from . import smart_agent as legacy
+from .llm import (
+    LLMCallError,
+    LLMConfigurationError,
+    LLMProviderError,
+    LLMResponseError,
+)
 from .tool_agent import ToolAgent
 
 logger = get_logger(__name__)
-
-LLMCallError = legacy.LLMCallError
-LLMConfigurationError = legacy.LLMConfigurationError
-LLMProviderError = legacy.LLMProviderError
-LLMResponseError = legacy.LLMResponseError
 
 _EDIT_SYSTEM_PROMPT = """\
 You are ZeroForge's Smart artifact repair agent operating in an authorized
@@ -67,7 +69,8 @@ def _normalize_context(
         max_chars=3900,
         max_sections=2,
     )
-    records = list(result.get("records", []))
+    raw_records = result.get("records", [])
+    records = cast(list[dict[str, Any]], raw_records if isinstance(raw_records, list) else [])
     selected = [record.get("id") for record in records if record.get("selected")]
     excluded = [record for record in records if not record.get("selected")]
     logger.info("PoC context selected=%s excluded=%d", selected, len(excluded))
@@ -96,28 +99,6 @@ def _normalize_context(
     )
 
 
-def _artifact_root_count(content: str, artifact_type: ArtifactType) -> int:
-    if artifact_type == ArtifactType.METASPLOIT:
-        return len(re.findall(r"(?m)^\s*class\s+MetasploitModule\b", content))
-    if artifact_type == ArtifactType.ZAP_ACTIVE:
-        metadata_count = len(re.findall(r"\bfunction\s+getMetadata\s*\(", content))
-        scan_count = len(
-            re.findall(
-                r"\bfunction\s+scan\s*\(\s*as\s*,\s*msg\s*,\s*param\s*,\s*value\s*\)",
-                content,
-            )
-        )
-        return 1 if metadata_count == 1 and scan_count == 1 else max(metadata_count, scan_count)
-    metadata_count = len(re.findall(r"\bfunction\s+getMetadata\s*\(", content))
-    scan_count = len(
-        re.findall(
-            r"\bfunction\s+scan\s*\(\s*ps\s*,\s*msg\s*,\s*src\s*\)",
-            content,
-        )
-    )
-    return 1 if metadata_count == 1 and scan_count == 1 else max(metadata_count, scan_count)
-
-
 def _rejection_comment(artifact_type: ArtifactType, message: str) -> str:
     prefix = "#" if artifact_type == ArtifactType.METASPLOIT else "//"
     return f"{prefix} ZeroForge rejected generated artifact: {message}\n"
@@ -127,14 +108,18 @@ def generate_artifact(
     vuln_input: VulnerabilityInput,
     context: CollectedContext,
 ) -> Artifact:
-    """Generate from normalized PoC evidence and reject concatenated roots."""
+    """Generate from normalized PoC evidence and reject invalid artifact roots."""
 
     normalized_context, records = _normalize_context(context)
     artifact = legacy.generate_artifact(vuln_input, normalized_context)
     metadata = {**artifact.metadata, "poc_selection": records}
-    root_count = _artifact_root_count(artifact.content, artifact.artifact_type)
-    if root_count != 1:
-        message = f"artifact must contain exactly one complete root; found {root_count}"
+    try:
+        roots = require_single_artifact(
+            artifact.content,
+            artifact.artifact_type.value,
+        )
+    except ArtifactEditError as exc:
+        message = str(exc)
         logger.warning("Generated artifact rejected before validation: %s", message)
         metadata.update(
             {
@@ -150,7 +135,7 @@ def generate_artifact(
             }
         )
 
-    metadata["artifact_root_count"] = root_count
+    metadata["artifact_roots"] = roots
     return artifact.model_copy(update={"metadata": metadata})
 
 
@@ -240,10 +225,17 @@ def _apply_model_edits(raw: str, artifact: Artifact) -> Artifact:
             plan = _legacy_full_replacement_plan(raw, artifact)
             legacy_full_replacement = True
 
-        arguments = {
+        raw_edits = plan.get("edits")
+        if not isinstance(raw_edits, list):
+            raise ArtifactEditError("artifact edit plan has invalid edits")
+        edits = cast(list[dict[str, str]], raw_edits)
+        base_sha256 = plan.get("base_sha256")
+        if not isinstance(base_sha256, str):
+            raise ArtifactEditError("artifact edit plan has invalid base_sha256")
+        arguments: dict[str, Any] = {
             "content": artifact.content,
-            "base_sha256": plan["base_sha256"],
-            "edits": plan["edits"],
+            "base_sha256": base_sha256,
+            "edits": edits,
             "artifact_type": artifact.artifact_type.value,
         }
         result = ToolAgent().run(
@@ -256,20 +248,23 @@ def _apply_model_edits(raw: str, artifact: Artifact) -> Artifact:
         )
         if result.error:
             raise ArtifactEditError(result.error)
-        output = result.output
-        if not isinstance(output, dict) or not isinstance(output.get("content"), str):
+        if not isinstance(result.output, dict):
             raise ArtifactEditError("artifact edit tool returned an invalid result")
+        output = cast(dict[str, Any], result.output)
+        content = output.get("content")
+        if not isinstance(content, str):
+            raise ArtifactEditError("artifact edit tool returned invalid content")
     except Exception as exc:
         logger.warning("Artifact edit plan rejected: %s", exc)
         return artifact
 
-    cfg = legacy.get_settings()
+    cfg = get_settings()
     metadata = {
         **artifact.metadata,
         "repaired": True,
-        "edit_count": output.get("applied_edits", len(plan["edits"])),
-        "edit_diff": output.get("diff", "")[-12_000:],
-        "edit_base_sha256": output.get("base_sha256", plan["base_sha256"]),
+        "edit_count": output.get("applied_edits", len(edits)),
+        "edit_diff": str(output.get("diff", ""))[-12_000:],
+        "edit_base_sha256": output.get("base_sha256", base_sha256),
         "edit_result_sha256": output.get("sha256", ""),
         "legacy_full_replacement": legacy_full_replacement,
     }
@@ -277,7 +272,7 @@ def _apply_model_edits(raw: str, artifact: Artifact) -> Artifact:
         metadata["stub"] = True
     return artifact.model_copy(
         update={
-            "content": output["content"],
+            "content": content,
             "metadata": metadata,
         }
     )
