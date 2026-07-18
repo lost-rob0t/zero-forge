@@ -29,6 +29,7 @@ ZeroForge is an LLM-driven exploit-development harness for **authorized security
 | Metasploit exploit | Ruby module | Ruby syntax and structural contract |
 | ZAP active scan rule | JavaScript | Must send a bounded, non-destructive probe and produce evidence-backed alerts |
 | ZAP passive scan rule | JavaScript | Must remain passive; network calls and request mutation are rejected |
+| Nuclei detection template | YAML | One template document, required metadata and protocol structure, matcher/extractor evidence, and optional native `nuclei -validate` |
 
 ## The pipeline
 
@@ -70,6 +71,7 @@ Two models. Hard role separation.
 - An OpenRouter, OpenAI, or Anthropic API key
 - Optional Brave Search or Tavily API key for public web research
 - Optional `searchsploit` for native lab PoC acquisition
+- Optional `nuclei` binary for native Nuclei template validation; YAML and structural validation still run without it
 
 ```bash
 git clone https://github.com/lost-rob0t/zero-forge.git
@@ -111,6 +113,12 @@ uv run zero-forge generate --cve CVE-2021-44228 --type zap_active_scan
 uv run zero-forge generate --cve CVE-2021-44228 --type zap_passive_scan
 ```
 
+Generate a Nuclei template:
+
+```bash
+uv run zero-forge generate --cve CVE-2021-44228 --type nuclei
+```
+
 Forge every supported artifact type:
 
 ```bash
@@ -132,6 +140,7 @@ Validate an existing artifact without generating anything:
 uv run zero-forge validate exploit.rb
 uv run zero-forge validate active-rule.js --type zap_active_scan
 uv run zero-forge validate passive-rule.js --type zap_passive_scan
+uv run zero-forge validate template.yaml --type nuclei
 ```
 
 ## Native source lab
@@ -169,7 +178,7 @@ uv run zero-forge lab status --name langflow-e1ee081d
 uv run zero-forge lab promote --run /path/to/lab/output/langflow-e1ee081d/<run-id>
 ```
 
-The lab root defaults to `$AI_HACKING_LAB` or `~/Documents/AI/hacking`; use `--lab-root` to override it. Each run contains `run.json`, raw PoC evidence, generated artifacts, and an atomic `latest` link. Promotion supports Metasploit, ZAP active, and ZAP passive artifacts, refuses empty bundles, and uses staged replacement with `--force`.
+The lab root defaults to `$AI_HACKING_LAB` or `~/Documents/AI/hacking`; use `--lab-root` to override it. Each run contains `run.json`, raw PoC evidence, generated artifacts, and an atomic `latest` link. Promotion supports Metasploit, ZAP active, ZAP passive, and Nuclei artifacts, refuses empty bundles, and uses staged replacement with `--force`.
 
 Use `--no-exploitdb` when SearchSploit is unavailable or raw PoC collection is not needed. Use `--dry-run` on `lab run`, `lab poc`, or `lab promote` to inspect resolved paths without mutation.
 
@@ -228,7 +237,7 @@ ZeroForge searches for a config file in the following order, using the first mat
 3. `./zeroforge.yaml` (current directory)
 4. `./zeroforge.yml`
 5. `$XDG_CONFIG_HOME/zeroforge/config.yaml`
-6. `$XDG_CONFIG_HOME/zeroforge/config.yml` (falls back to `~/.config` when `XDG_CONFIG_HOME` is unset or empty)
+6. `$XDG_CONFIG_HOME/zeroforge/config.yml` (falls back to `~/.config` when `$XDG_CONFIG_HOME` is unset or empty)
 
 If no config file exists in any of these locations, the CLI automatically writes a default `config.yaml` to the XDG config directory and prints a message telling you to edit it. This happens only when no `--config` flag is passed.
 
@@ -277,6 +286,7 @@ ZeroForge is built to fail closed:
 - only validator-clean sessions are moved into the configured output tree;
 - missing Ruby blocks Metasploit validation;
 - passive ZAP rules fail when they attempt active behavior;
+- malformed or concatenated Nuclei templates fail YAML and structural validation;
 - stub mode never produces a successful artifact.
 
 ## Layout
@@ -287,7 +297,7 @@ zero_forge/
 ├── discovery/       seeded analysis and iterative exploit drafting
 ├── lab/             native source acquisition, run staging, and promotion
 ├── tools/           allowlisted research, workspace, publishing, and validation tools
-├── llm_examples/    bounded Metasploit and ZAP references
+├── llm_examples/    bounded Metasploit, ZAP, and Nuclei references
 ├── workflow.py      LangGraph orchestration and repair loop
 ├── schemas.py       typed state, input, and artifact contracts
 ├── examples.py      artifact-specific example loading
