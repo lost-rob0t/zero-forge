@@ -4,10 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
-
 import zero_forge.agents.smart_agent as smart_agent
-from zero_forge.agents.smart_agent import _build_context_prompt, repair_artifact
 from zero_forge.agents.llm import LLMResponseError
+from zero_forge.agents.smart_agent import _build_context_prompt, repair_artifact
 from zero_forge.schemas import (
     Artifact,
     ArtifactType,
