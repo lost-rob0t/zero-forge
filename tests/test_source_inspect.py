@@ -919,6 +919,78 @@ def test_bounded_read_truncates_on_traversal_candidates(monkeypatch):
         assert len(readable) < 50
 
 
+def test_bounded_traversal_consumes_lazy_iterator_only_to_limit(monkeypatch):
+    """Traversal must not request another entry after its budget is exhausted."""
+    import zero_forge.tools.source_inspect as si
+
+    monkeypatch.setattr(si, "_MAX_TRAVERSAL_CANDIDATES", 3)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        paths = []
+        for name in ("c.py", "a.py", "b.py", "unseen.py"):
+            path = Path(tmpdir) / name
+            path.write_text(f"# {name}\\n")
+            paths.append(path)
+
+        class FakeEntry:
+            def __init__(self, path: Path) -> None:
+                self.path = str(path)
+                self.name = path.name
+
+            def is_symlink(self) -> bool:
+                return False
+
+            def is_dir(self, *, follow_symlinks: bool = True) -> bool:
+                return False
+
+            def is_file(self, *, follow_symlinks: bool = True) -> bool:
+                return True
+
+        class LazyScandir:
+            def __init__(self) -> None:
+                self._entries = iter(FakeEntry(path) for path in paths)
+                self.requested = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.requested += 1
+                return next(self._entries)
+
+        scandir = LazyScandir()
+        with monkeypatch.context() as context:
+            context.setattr(si.os, "scandir", lambda _path: scandir)
+            results = read_source_files(tmpdir, max_files=20)
+
+        readable = [r for r in results if not r.get("skipped") and not r.get("truncated")]
+        assert [r["filename"] for r in readable] == ["a.py", "b.py", "c.py"]
+        assert scandir.requested == 3
+        assert len([r for r in results if r.get("truncated")]) == 1
+
+
+def test_bounded_traversal_reports_truncation_with_no_eligible_files(monkeypatch):
+    """Exhausting traversal on skipped entries must still report truncation once."""
+    import zero_forge.tools.source_inspect as si
+
+    monkeypatch.setattr(si, "_MAX_TRAVERSAL_CANDIDATES", 10)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for i in range(100):
+            (Path(tmpdir) / f"image_{i:03d}.png").write_bytes(b"png")
+
+        results = read_source_files(tmpdir, max_files=20)
+
+        assert not [r for r in results if not r.get("skipped") and not r.get("truncated")]
+        assert len([r for r in results if r.get("truncated")]) == 1
+
+
 def test_bounded_read_single_file_not_truncated():
     """A single file input should not produce a truncation entry."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
@@ -979,3 +1051,4 @@ def test_search_code_excludes_truncation_entry_from_targets(monkeypatch):
             assert "<budget>" not in args, (
                 "<budget> truncation entry leaked into rg_targets"
             )
+
