@@ -72,7 +72,7 @@ def test_edit_cannot_concatenate_second_metasploit_module():
         apply_artifact_edits(
             MODULE,
             artifact_sha256(MODULE),
-            [{"old": "end\n", "new": "end\n" + second}],
+            [{"old": MODULE, "new": MODULE + second}],
             artifact_type="metasploit",
         )
 
