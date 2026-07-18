@@ -237,7 +237,7 @@ ZeroForge searches for a config file in the following order, using the first mat
 3. `./zeroforge.yaml` (current directory)
 4. `./zeroforge.yml`
 5. `$XDG_CONFIG_HOME/zeroforge/config.yaml`
-6. `$XDG_CONFIG_HOME/zeroforge/config.yml` (falls back to `~/.config` when `$XDG_CONFIG_HOME` is unset or empty)
+6. `$XDG_CONFIG_HOME/zeroforge/config.yml` (falls back to `~/.config` when `XDG_CONFIG_HOME` is unset or empty)
 
 If no config file exists in any of these locations, the CLI automatically writes a default `config.yaml` to the XDG config directory and prints a message telling you to edit it. This happens only when no `--config` flag is passed.
 
