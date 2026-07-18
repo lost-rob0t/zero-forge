@@ -49,6 +49,7 @@ def _layout(value: str) -> PurePosixPath:
 
 
 def _artifact_files(root: Path, artifact_type: ArtifactType) -> list[Path]:
+    suffixes: tuple[str, ...]
     if artifact_type == ArtifactType.METASPLOIT:
         suffixes = (".rb",)
     elif artifact_type in {ArtifactType.ZAP_ACTIVE, ArtifactType.ZAP_PASSIVE}:
