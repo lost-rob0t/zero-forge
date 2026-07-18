@@ -72,7 +72,7 @@ def _nuclei_document_count(content: str) -> int:
     if not content.strip():
         return 0
     try:
-        return sum(1 for document in yaml.safe_load_all(content) if document is not None)
+        return sum(1 for _document in yaml.safe_load_all(content))
     except yaml.YAMLError:
         # Let the dedicated validator report malformed YAML after the root guard.
         return 1
