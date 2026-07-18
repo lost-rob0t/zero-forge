@@ -72,7 +72,7 @@ def test_ambiguous_old_text_is_rejected():
 
 
 def test_concatenated_module_result_is_rejected():
-    with pytest.raises(ArtifactEditError, match="MetasploitModule=2"):
+    with pytest.raises(ArtifactEditError, match="multiple MetasploitModule"):
         apply_artifact_edits(
             content=MODULE,
             base_sha256=artifact_sha256(MODULE),
