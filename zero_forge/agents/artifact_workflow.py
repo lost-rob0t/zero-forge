@@ -23,12 +23,7 @@ from ..tools.artifact_edit import (
 )
 from ..tools.poc_context import normalize_poc_context
 from . import smart_agent as legacy
-from .llm import (
-    LLMCallError,
-    LLMConfigurationError,
-    LLMProviderError,
-    LLMResponseError,
-)
+from .llm import LLMCallError
 from .tool_agent import ToolAgent
 
 logger = get_logger(__name__)
@@ -70,7 +65,10 @@ def _normalize_context(
         max_sections=2,
     )
     raw_records = result.get("records", [])
-    records = cast(list[dict[str, Any]], raw_records if isinstance(raw_records, list) else [])
+    records = cast(
+        list[dict[str, Any]],
+        raw_records if isinstance(raw_records, list) else [],
+    )
     selected = [record.get("id") for record in records if record.get("selected")]
     excluded = [record for record in records if not record.get("selected")]
     logger.info("PoC context selected=%s excluded=%d", selected, len(excluded))
@@ -155,7 +153,9 @@ def _build_edit_prompt(
         *(f"- {error}" for error in validation.errors),
     ]
     if validation.warnings:
-        parts.extend(["## Warnings", *(f"- {warning}" for warning in validation.warnings)])
+        parts.extend(
+            ["## Warnings", *(f"- {warning}" for warning in validation.warnings)]
+        )
     if context.extra_notes:
         parts.append(f"## Context Notes\n{context.extra_notes}")
     parts.extend(
@@ -202,7 +202,9 @@ def _build_edit_prompt(
 def _legacy_full_replacement_plan(raw: str, artifact: Artifact) -> dict[str, Any]:
     code = legacy._extract_code_block(raw, artifact.artifact_type)
     if not code.strip():
-        raise ArtifactEditError("repair output did not contain an edit plan or artifact content")
+        raise ArtifactEditError(
+            "repair output did not contain an edit plan or artifact content"
+        )
     return {
         "base_sha256": artifact_sha256(artifact.content),
         "edits": [{"old": artifact.content, "new": code}],
