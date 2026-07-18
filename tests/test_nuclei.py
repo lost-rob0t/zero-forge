@@ -188,6 +188,22 @@ def test_nuclei_repair_cannot_concatenate_a_second_yaml_document() -> None:
         )
 
 
+def test_nuclei_root_guard_accepts_document_marker_in_block_scalar() -> None:
+    content = VALID_TEMPLATE.replace(
+        "  description: Demonstrates a bounded HTTP response-header matcher.",
+        "  description: |\n    marker\n    ---\n    still one document",
+    )
+
+    result = apply_artifact_edits(
+        content,
+        artifact_sha256(content),
+        [{"old": '"Content-Type"', "new": '"Content-Length"'}],
+        artifact_type="nuclei",
+    )
+
+    assert result["artifact_roots"] == {"NucleiTemplate": 1}
+
+
 def test_nuclei_workflow_does_not_require_node(monkeypatch, tmp_path) -> None:
     def unexpected_node() -> str:
         pytest.fail("Nuclei generation must not require Node.js")
