@@ -38,6 +38,7 @@ class ArtifactType(StrEnum):
     METASPLOIT = "metasploit"
     ZAP_ACTIVE = "zap_active_scan"
     ZAP_PASSIVE = "zap_passive_scan"
+    NUCLEI = "nuclei"
 
 
 class VulnerabilityInput(BaseModel):
