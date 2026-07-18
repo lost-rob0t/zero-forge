@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from ..config import get_settings
 from ..examples import ArtifactExample, load_artifact_examples
@@ -16,6 +17,13 @@ from ..schemas import (
     ValidationResult,
     VulnerabilityInput,
 )
+from ..tools.artifact_edit import (
+    ArtifactEditError,
+    apply_artifact_edits,
+    artifact_sha256,
+    parse_artifact_edit_plan,
+)
+from ..tools.poc_context import normalize_poc_context
 from .llm import (
     LLMCallError,
     LLMConfigurationError,
@@ -65,6 +73,21 @@ Use only the supplied vulnerability evidence. Identify the actual software, vend
 CVE, vulnerability type, endpoints, parameters, and affected versions. Never
 substitute a generic target. Emit one complete artifact and no prose outside its
 code fence.
+"""
+
+_REPAIR_SYSTEM_PROMPT = """\
+You are ZeroForge's Smart Agent repairing one existing security validation artifact
+inside an explicitly authorized engagement. You may only propose exact replacements
+against the supplied immutable artifact revision. Do not return a complete artifact,
+do not append content, and do not concatenate alternatives.
+
+Return exactly one JSON object with this shape:
+{"base_sha256":"<supplied digest>","edits":[
+  {"old":"<exact unique existing text>","new":"<replacement text>"}
+]}
+
+Every old value must be non-empty, copied exactly from the current artifact, and occur
+exactly once. Preserve all unrelated content. Return no prose or code fence.
 """
 
 _PROFILES = {
@@ -150,6 +173,11 @@ def _system_prompt(artifact_type: ArtifactType) -> str:
     return _BASE_SYSTEM_PROMPT + _profile(artifact_type).system_instructions
 
 
+def _repair_system_prompt(artifact_type: ArtifactType) -> str:
+    profile = _profile(artifact_type)
+    return _REPAIR_SYSTEM_PROMPT + f"\nArtifact language: {profile.language}.\n"
+
+
 def _format_examples(artifact_type: ArtifactType) -> str:
     examples = load_artifact_examples(artifact_type)
     if not examples:
@@ -164,6 +192,14 @@ def _format_examples(artifact_type: ArtifactType) -> str:
         parts.append(f"### {example.name}")
         parts.append(f"```{profile.language}\n{example.content}\n```")
     return "\n\n".join(parts)
+
+
+def _poc_target_text(ctx: CollectedContext) -> str:
+    parts = [ctx.cve_description, ctx.affected_versions, ctx.writeup_text[:4000]]
+    for source_file in ctx.source_files[:12]:
+        parts.append(source_file.filename)
+        parts.append(source_file.content[:4000])
+    return "\n".join(part for part in parts if part)
 
 
 def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> str:
@@ -184,7 +220,24 @@ def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> st
         parts.append("### References")
         parts.extend(f"- {ref}" for ref in ctx.references[:10])
     if ctx.poc_text:
-        parts.append(f"### Proof of Concept\n```\n{ctx.poc_text[:4000]}\n```")
+        normalized = normalize_poc_context(
+            ctx.poc_text,
+            requested_cve=ctx.cve_id,
+            target_text=_poc_target_text(ctx),
+        )
+        records = normalized["records"]
+        selected = [record for record in records if record["selected"]]
+        logger.info(
+            "PoC normalization selected %d of %d section(s)",
+            len(selected),
+            len(records),
+        )
+        parts.append("### PoC Selection Decisions")
+        for record in records:
+            state = "selected" if record["selected"] else "excluded"
+            parts.append(f"- {record['id']}: {state} — {record['reason']}")
+        if normalized["text"]:
+            parts.append(f"### Selected Proof of Concept\n```\n{normalized['text']}\n```")
     if ctx.writeup_text:
         parts.append(f"### Write-up\n{ctx.writeup_text[:4000]}")
     if ctx.patch_diff:
@@ -232,8 +285,10 @@ def _build_repair_prompt(
     max_attempts: int = 0,
 ) -> str:
     profile = _profile(artifact.artifact_type)
+    base_sha256 = artifact_sha256(artifact.content)
     parts = [
         f"## Artifact Contract\n{profile.contract.strip()}",
+        f"## Base SHA-256\n{base_sha256}",
         "## Validation Issues",
         *(f"- {error}" for error in validation.errors),
     ]
@@ -248,21 +303,16 @@ def _build_repair_prompt(
             ),
         ]
     )
-    # Format reminder: prevent the model from mixing prose into code blocks (issue #72).
     parts.append(
-        f"## Output Format\n"
-        f"Output ONLY {profile.language} code inside a single "
-        f"```{profile.language} code block. Do not include any explanatory "
-        f"text, comments about what changed, or prose outside the code block. "
-        f"The code block must contain a complete, self-contained "
-        f"{profile.label}."
+        "## Output Format\n"
+        "Output ONLY one strict JSON object containing base_sha256 and edits. "
+        "Each edit must contain exact old text copied from the current artifact and "
+        "replacement new text. Do not include explanatory text, a code fence, a complete "
+        "replacement artifact, or an append operation."
     )
-    # Attempt tracking and recurring-error guidance (issue #72).
     task_parts = [
-        f"## Task\nAddress all validation issues in the "
-        f"remediation validation module above. "
-        f"Return the complete corrected artifact in one "
-        f"```{profile.language} code block."
+        "## Task\nAddress all validation issues by returning the smallest exact-match "
+        "edit set needed for the remediation validation module above."
     ]
     if attempt and max_attempts:
         task_parts.append(
@@ -272,17 +322,18 @@ def _build_repair_prompt(
         if attempt >= 2:
             task_parts.append(
                 f"Previous repair attempts did not resolve the same errors. "
-                f"Take a different approach: carefully re-read the artifact "
-                f"contract and reference examples, ensure you are not "
-                f"including any non-{profile.language} text inside the code "
-                f"block, and verify every required method and metadata field "
-                f"is present."
+                f"Take a different approach: carefully re-read the artifact contract and "
+                f"reference examples, ensure no non-{profile.language} text is inserted, "
+                f"and choose old spans that occur exactly once."
             )
     parts.append(" ".join(task_parts))
     return "\n\n".join(parts)
 
 
-def _extract_code_block(text: str, artifact_type: ArtifactType = ArtifactType.METASPLOIT) -> str:
+def _extract_code_block(
+    text: str,
+    artifact_type: ArtifactType = ArtifactType.METASPLOIT,
+) -> str:
     profile = _profile(artifact_type)
     fences = [f"```{alias}" for alias in profile.fence_aliases]
     fences.append("```")
@@ -381,19 +432,13 @@ def _is_refusal(text: str) -> bool:
     lower = text.strip().lower()
     if not lower:
         return True
-    # If it looks like code, it's not a refusal
     if "class " in lower or "def " in lower or "msf::" in lower or "function " in lower:
         return False
     return any(phrase in lower for phrase in refusal_phrases)
 
 
 def _check_refusal(code: str, phase: str) -> str:
-    """Detect content-filter refusal and log/print a warning.
-
-    Returns the original *code* if it appears to be valid output, or a comment
-    placeholder so downstream validation surfaces the problem rather than
-    silently passing.
-    """
+    """Detect content-filter refusal and emit an actionable warning."""
     if not _is_refusal(code):
         return code
     cfg = get_settings()
@@ -408,15 +453,10 @@ def _check_refusal(code: str, phase: str) -> str:
 
 
 def _finalize_generation(
-    raw: str, artifact_type: ArtifactType, cve_id: str
+    raw: str,
+    artifact_type: ArtifactType,
+    cve_id: str,
 ) -> Artifact:
-    """Shared post-processing for artifact generation (sync and async).
-
-    Extracts the code block, checks for refusals, and builds the Artifact with
-    standard metadata.  Called by both ``generate_artifact`` and
-    ``generate_artifact_async`` so that extraction, refusal handling, and
-    metadata construction live in one place.
-    """
     code = _extract_code_block(raw, artifact_type)
     logger.debug("Extracted code block: %d chars", len(code))
     code = _check_refusal(code, "generation")
@@ -435,28 +475,59 @@ def _finalize_generation(
     )
 
 
-def _finalize_repair(raw: str, artifact: Artifact) -> Artifact:
-    """Shared post-processing for artifact repair (sync and async).
+def _repair_plan(raw: str, artifact: Artifact) -> dict[str, Any] | None:
+    if _is_refusal(raw):
+        _check_refusal(raw, "repair")
+        return None
+    try:
+        return parse_artifact_edit_plan(raw)
+    except ArtifactEditError:
+        code = _extract_code_block(raw, artifact.artifact_type)
+        if not code.strip():
+            logger.warning("Repair produced empty output; returning original artifact")
+            return None
+        logger.warning("Repair returned a legacy full artifact; converting it to one guarded edit")
+        return {
+            "base_sha256": artifact_sha256(artifact.content),
+            "edits": [{"old": artifact.content, "new": code}],
+        }
 
-    Extracts the code block, checks for refusals and empty output, and builds
-    the repaired Artifact with updated metadata.  Called by both
-    ``repair_artifact`` and ``repair_artifact_async`` so that refusal logic,
-    empty-output handling, and metadata construction live in one place.
-    """
-    code = _extract_code_block(raw, artifact.artifact_type)
-    if _is_refusal(code):
-        _check_refusal(code, "repair")
+
+def _finalize_repair(raw: str, artifact: Artifact) -> Artifact:
+    plan = _repair_plan(raw, artifact)
+    if plan is None:
         return artifact
-    if not code.strip():
-        logger.warning("Repair produced empty code block; returning original artifact")
-        return artifact
+    try:
+        result = apply_artifact_edits(
+            artifact.content,
+            str(plan["base_sha256"]),
+            list(plan["edits"]),
+            artifact_type=artifact.artifact_type.value,
+        )
+    except ArtifactEditError as exc:
+        cfg = get_settings()
+        resolved = resolve_model("smart", cfg.models.smart)
+        raise LLMResponseError(
+            f"Smart Agent returned an invalid artifact edit plan: {exc}",
+            provider=resolved.provider,
+            model=resolved.model,
+            retryable=False,
+        ) from exc
+
     cfg = get_settings()
-    new_metadata = {**artifact.metadata, "repaired": True}
+    new_metadata = {
+        **artifact.metadata,
+        "repaired": True,
+        "repair_base_sha256": result["base_sha256"],
+        "repair_sha256": result["sha256"],
+        "repair_diff": result["diff"],
+        "repair_edits": result["applied_edits"],
+    }
     if cfg.llm.stub_mode:
         new_metadata["stub"] = True
     return Artifact(
         artifact_type=artifact.artifact_type,
-        content=code,
+        content=str(result["content"]),
         filename=artifact.filename,
         metadata=new_metadata,
     )
@@ -479,6 +550,7 @@ def repair_artifact(
     attempt: int = 0,
     max_attempts: int = 0,
 ) -> Artifact:
+    del context
     logger.info(
         "Repairing artifact (%d validation errors, attempt %d/%d)",
         len(validation.errors),
@@ -486,13 +558,17 @@ def repair_artifact(
         max_attempts,
     )
     prompt = _build_repair_prompt(
-        artifact, validation, attempt=attempt, max_attempts=max_attempts
+        artifact,
+        validation,
+        attempt=attempt,
+        max_attempts=max_attempts,
     )
-    raw = _call_llm(_system_prompt(artifact.artifact_type), prompt, artifact.artifact_type)
+    raw = _call_llm(
+        _repair_system_prompt(artifact.artifact_type),
+        prompt,
+        artifact.artifact_type,
+    )
     return _finalize_repair(raw, artifact)
-
-
-# --- Async variants (issue #83) -----------------------------------------
 
 
 async def generate_artifact_async(
@@ -501,11 +577,6 @@ async def generate_artifact_async(
     *,
     on_chunk: Callable[[str], None] | None = None,
 ) -> Artifact:
-    """Async variant of generate_artifact with optional streaming callback.
-
-    Delegates post-processing to :func:`_finalize_generation` so that sync and
-    async paths share identical extraction, refusal, and metadata logic.
-    """
     artifact_type = vuln_input.artifact_type
     logger.info("Generating artifact (async) for CVE %s", context.cve_id)
     prompt = _build_context_prompt(vuln_input, context)
@@ -514,8 +585,10 @@ async def generate_artifact_async(
         raw = _stub_artifact(artifact_type)
     else:
         raw = await call_model_async(
-            "smart", cfg.models.smart,
-            _system_prompt(artifact_type), prompt,
+            "smart",
+            cfg.models.smart,
+            _system_prompt(artifact_type),
+            prompt,
             on_chunk=on_chunk,
         )
     return _finalize_generation(raw, artifact_type, context.cve_id)
@@ -530,11 +603,7 @@ async def repair_artifact_async(
     max_attempts: int = 0,
     on_chunk: Callable[[str], None] | None = None,
 ) -> Artifact:
-    """Async variant of repair_artifact with optional streaming callback.
-
-    Delegates post-processing to :func:`_finalize_repair` so that sync and
-    async paths share identical refusal, empty-output, and metadata logic.
-    """
+    del context
     logger.info(
         "Repairing artifact (async) (%d validation errors, attempt %d/%d)",
         len(validation.errors),
@@ -542,15 +611,20 @@ async def repair_artifact_async(
         max_attempts,
     )
     prompt = _build_repair_prompt(
-        artifact, validation, attempt=attempt, max_attempts=max_attempts
+        artifact,
+        validation,
+        attempt=attempt,
+        max_attempts=max_attempts,
     )
     cfg = get_settings()
     if cfg.llm.stub_mode:
         raw = _stub_artifact(artifact.artifact_type)
     else:
         raw = await call_model_async(
-            "smart", cfg.models.smart,
-            _system_prompt(artifact.artifact_type), prompt,
+            "smart",
+            cfg.models.smart,
+            _repair_system_prompt(artifact.artifact_type),
+            prompt,
             on_chunk=on_chunk,
         )
     return _finalize_repair(raw, artifact)
