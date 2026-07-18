@@ -8,6 +8,7 @@ from zero_forge.tools.artifact_edit import (
     artifact_sha256,
     diff_artifact_edits,
     parse_artifact_edit_plan,
+    require_single_artifact,
 )
 
 MODULE = """class MetasploitModule < Msf::Exploit::Remote
@@ -34,6 +35,7 @@ def test_apply_exact_edit_returns_unified_diff():
     assert "def check" in result["content"]
     assert result["base_sha256"] == artifact_sha256(MODULE)
     assert result["sha256"] == artifact_sha256(result["content"])
+    assert result["artifact_roots"] == {"MetasploitModule": 1}
     assert "+++ artifact.after" in result["diff"]
 
 
@@ -70,12 +72,20 @@ def test_ambiguous_old_text_is_rejected():
 
 
 def test_concatenated_module_result_is_rejected():
-    with pytest.raises(ArtifactEditError, match="multiple MetasploitModule"):
+    with pytest.raises(ArtifactEditError, match="MetasploitModule=2"):
         apply_artifact_edits(
             content=MODULE,
             base_sha256=artifact_sha256(MODULE),
             edits=[{"old": MODULE, "new": MODULE + "\n" + MODULE}],
             artifact_type="metasploit",
+        )
+
+
+def test_missing_required_zap_root_is_rejected():
+    with pytest.raises(ArtifactEditError, match="getMetadata=0"):
+        require_single_artifact(
+            "function scan(as, msg, param, value) {}",
+            "zap_active_scan",
         )
 
 
