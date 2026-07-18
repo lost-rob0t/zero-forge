@@ -23,7 +23,7 @@ from ..tools.artifact_edit import (
 )
 from ..tools.poc_context import normalize_poc_context
 from . import smart_agent as legacy
-from .llm import LLMCallError
+from .llm import LLMCallError as LLMCallError
 from .tool_agent import ToolAgent
 
 logger = get_logger(__name__)
