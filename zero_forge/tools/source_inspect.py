@@ -15,19 +15,56 @@ from typing import Any
 
 _DOC_EXTS = {".md", ".txt", ".rst", ".adoc", ".org"}
 _CONFIG_EXTS = {
-    ".json", ".yaml", ".yml", ".ini", ".conf", ".properties",
-    ".env", ".cfg", ".toml", ".xml", ".config",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".ini",
+    ".conf",
+    ".properties",
+    ".env",
+    ".cfg",
+    ".toml",
+    ".xml",
+    ".config",
 }
 _DATA_EXTS = {".csv", ".tsv", ".sql", ".sqlite"}
 _SKIP_EXTS = {
-    ".pyc", ".pyo", ".class", ".jar", ".war", ".zip", ".gz",
-    ".tar", ".bz2", ".7z", ".rar", ".png", ".jpg", ".jpeg",
-    ".gif", ".bmp", ".ico", ".pdf", ".exe", ".dll", ".so",
-    ".dylib", ".bin", ".dat", ".db",
+    ".pyc",
+    ".pyo",
+    ".class",
+    ".jar",
+    ".war",
+    ".zip",
+    ".gz",
+    ".tar",
+    ".bz2",
+    ".7z",
+    ".rar",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".ico",
+    ".pdf",
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
+    ".bin",
+    ".dat",
+    ".db",
 }
 _DOC_FILENAMES = {
-    "readme", "changelog", "changes", "authors", "license",
-    "copying", "install", "hacking", "todo",
+    "readme",
+    "changelog",
+    "changes",
+    "authors",
+    "license",
+    "copying",
+    "install",
+    "hacking",
+    "todo",
 }
 _CATEGORY_PRIORITY = {"documentation": 0, "config": 1, "data": 2, "code": 3}
 
@@ -36,18 +73,41 @@ _CATEGORY_PRIORITY = {"documentation": 0, "config": 1, "data": 2, "code": 3}
 # Filenames that are always secrets or credentials when matched
 # case-insensitively against the basename (with optional extension).
 _SECRET_FILENAMES: set[str] = {
-    ".env", ".env.local", ".env.production", ".env.staging", ".env.development",
-    ".env.test", ".env.example",  # .env.example is a template, but skip to be safe
-    ".npmrc", ".pypirc", ".netrc", "credentials", "credentials.json",
-    "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
-    "identity", "secret.key", "private.key", "private_key",
-    "serviceaccount.json", "credentials.csv",
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".env.staging",
+    ".env.development",
+    ".env.test",
+    ".env.example",  # .env.example is a template, but skip to be safe
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    "credentials",
+    "credentials.json",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "identity",
+    "secret.key",
+    "private.key",
+    "private_key",
+    "serviceaccount.json",
+    "credentials.csv",
 }
 
 # Extensions associated with private keys and certificate secrets.
 _SECRET_EXTS: set[str] = {
-    ".pem", ".key", ".p12", ".pfx", ".keystore", ".jks",
-    ".ssh", ".gpg", ".asc",
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".keystore",
+    ".jks",
+    ".ssh",
+    ".gpg",
+    ".asc",
 }
 
 # Regex patterns for filenames that look like secrets.
@@ -81,9 +141,19 @@ def _is_secret_file(filepath: str) -> bool:
 # --- VCS ignore support -------------------------------------------------
 
 _SKIP_DIRS = {
-    ".git", "node_modules", "__pycache__", ".venv", "venv",
-    "build", "dist", ".mypy_cache", ".ruff_cache", ".pytest_cache",
-    ".tox", ".eggs", ".cache",
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".pytest_cache",
+    ".tox",
+    ".eggs",
+    ".cache",
 }
 
 
@@ -120,19 +190,42 @@ def _is_gitignored(rel_path: str, patterns: list[re.Pattern[str]]) -> bool:
 
 # --- Language detection -------------------------------------------------
 
+
 def _detect_language(filepath: str) -> str:
     ext_map = {
-        ".py": "python", ".rb": "ruby", ".js": "javascript", ".ts": "typescript",
-        ".java": "java", ".c": "c", ".cpp": "cpp", ".h": "c",
-        ".go": "go", ".rs": "rust", ".php": "php", ".sh": "bash",
-        ".pl": "perl", ".xml": "xml", ".html": "html",
-        ".yml": "yaml", ".yaml": "yaml",
-        ".md": "markdown", ".txt": "text", ".rst": "rst",
-        ".json": "json", ".ini": "ini", ".conf": "conf",
-        ".properties": "properties", ".toml": "toml",
-        ".cfg": "ini", ".env": "env", ".csv": "csv",
-        ".cfm": "cfml", ".cfc": "cfml",
-        ".asp": "asp", ".aspx": "asp", ".jsp": "jsp",
+        ".py": "python",
+        ".rb": "ruby",
+        ".js": "javascript",
+        ".ts": "typescript",
+        ".java": "java",
+        ".c": "c",
+        ".cpp": "cpp",
+        ".h": "c",
+        ".go": "go",
+        ".rs": "rust",
+        ".php": "php",
+        ".sh": "bash",
+        ".pl": "perl",
+        ".xml": "xml",
+        ".html": "html",
+        ".yml": "yaml",
+        ".yaml": "yaml",
+        ".md": "markdown",
+        ".txt": "text",
+        ".rst": "rst",
+        ".json": "json",
+        ".ini": "ini",
+        ".conf": "conf",
+        ".properties": "properties",
+        ".toml": "toml",
+        ".cfg": "ini",
+        ".env": "env",
+        ".csv": "csv",
+        ".cfm": "cfml",
+        ".cfc": "cfml",
+        ".asp": "asp",
+        ".aspx": "asp",
+        ".jsp": "jsp",
     }
     _, ext = os.path.splitext(filepath)
     return ext_map.get(ext.lower(), "unknown")
@@ -161,8 +254,9 @@ def _should_skip(filepath: str) -> bool:
 
 _MAX_TRAVERSAL_CANDIDATES = 500
 _MAX_READ_BYTES = 1_048_576  # 1 MiB total across all files
-_TRAVERSAL_TIMEOUT = 10.0   # seconds for directory walk
-_READ_TIMEOUT = 10.0        # seconds for content reads
+_TRAVERSAL_TIMEOUT = 10.0  # seconds for directory walk
+_READ_TIMEOUT = 10.0  # seconds for content reads
+
 
 def read_source_files(
     source_path: str,
@@ -243,42 +337,50 @@ def read_source_files(
         if not unsafe:
             # 1. Never follow symlinks.
             if fpath.is_symlink():
-                skipped.append({
-                    "path": str(fpath),
-                    "filename": fpath.name,
-                    "skipped": True,
-                    "reason": "symlink: not following file symlinks",
-                })
+                skipped.append(
+                    {
+                        "path": str(fpath),
+                        "filename": fpath.name,
+                        "skipped": True,
+                        "reason": "symlink: not following file symlinks",
+                    }
+                )
                 continue
 
             # 2. Verify resolved path stays under source root.
             try:
                 resolved = fpath.resolve()
                 if not str(resolved).startswith(str(base)):
-                    skipped.append({
+                    skipped.append(
+                        {
+                            "path": str(fpath),
+                            "filename": fpath.name,
+                            "skipped": True,
+                            "reason": "path escape: file resolves outside source root",
+                        }
+                    )
+                    continue
+            except OSError:
+                skipped.append(
+                    {
                         "path": str(fpath),
                         "filename": fpath.name,
                         "skipped": True,
-                        "reason": "path escape: file resolves outside source root",
-                    })
-                    continue
-            except OSError:
-                skipped.append({
-                    "path": str(fpath),
-                    "filename": fpath.name,
-                    "skipped": True,
-                    "reason": "resolve error: unable to resolve path",
-                })
+                        "reason": "resolve error: unable to resolve path",
+                    }
+                )
                 continue
 
             # 3. Exclude known secret/credential files.
             if _is_secret_file(str(fpath)):
-                skipped.append({
-                    "path": str(fpath),
-                    "filename": fpath.name,
-                    "skipped": True,
-                    "reason": "secret file: credential or key material excluded",
-                })
+                skipped.append(
+                    {
+                        "path": str(fpath),
+                        "filename": fpath.name,
+                        "skipped": True,
+                        "reason": "secret file: credential or key material excluded",
+                    }
+                )
                 continue
 
             # 4. Respect .gitignore rules.
@@ -287,12 +389,14 @@ def read_source_files(
             except ValueError:
                 rel = str(fpath)
             if _is_gitignored(rel, gitignore_patterns):
-                skipped.append({
-                    "path": str(fpath),
-                    "filename": fpath.name,
-                    "skipped": True,
-                    "reason": "gitignored: file matches .gitignore pattern",
-                })
+                skipped.append(
+                    {
+                        "path": str(fpath),
+                        "filename": fpath.name,
+                        "skipped": True,
+                        "reason": "gitignored: file matches .gitignore pattern",
+                    }
+                )
                 continue
 
         # --- Common checks (both safe and unsafe modes) ---
@@ -303,14 +407,16 @@ def read_source_files(
             if size > max_file_size:
                 continue
             category = _categorize_file(str(fpath))
-            candidates.append({
-                "path": str(fpath),
-                "filename": fpath.name,
-                "language": _detect_language(str(fpath)),
-                "category": category,
-                "size": size,
-                "_fpath": fpath,
-            })
+            candidates.append(
+                {
+                    "path": str(fpath),
+                    "filename": fpath.name,
+                    "language": _detect_language(str(fpath)),
+                    "category": category,
+                    "size": size,
+                    "_fpath": fpath,
+                }
+            )
         except OSError:
             continue
 
@@ -338,26 +444,30 @@ def read_source_files(
             if "\x00" in raw:
                 continue
             total_bytes += len(raw)
-            results.append({
-                "path": cand["path"],
-                "content": raw,
-                "language": cand["language"],
-                "category": cand["category"],
-                "filename": cand["filename"],
-            })
+            results.append(
+                {
+                    "path": cand["path"],
+                    "content": raw,
+                    "language": cand["language"],
+                    "category": cand["category"],
+                    "filename": cand["filename"],
+                }
+            )
         except OSError:
             continue
 
     if truncated:
-        results.append({
-            "path": "<budget>",
-            "filename": "<budget>",
-            "truncated": True,
-            "reason": (
-                f"Source scanning budget exhausted: {len(results)} files read, "
-                f"{total_bytes} bytes, {len(candidates)} candidates found"
-            ),
-        })
+        results.append(
+            {
+                "path": "<budget>",
+                "filename": "<budget>",
+                "truncated": True,
+                "reason": (
+                    f"Source scanning budget exhausted: {len(results)} files read, "
+                    f"{total_bytes} bytes, {len(candidates)} candidates found"
+                ),
+            }
+        )
 
     return results + skipped
 
@@ -404,8 +514,7 @@ def search_code(
         # admitted set so the caller's list is never treated as authorization.
         admitted_raw = read_source_files(source_path, unsafe=False)
         admitted_set = {
-            r["path"] for r in admitted_raw
-            if not r.get("skipped") and not r.get("truncated")
+            r["path"] for r in admitted_raw if not r.get("skipped") and not r.get("truncated")
         }
         search_files = [p for p in allowed_paths if p in admitted_set]
         rg_targets = search_files
@@ -413,8 +522,7 @@ def search_code(
         # Safe without allowlist: apply policy via read_source_files().
         admitted = read_source_files(source_path, unsafe=False)
         search_files = [
-            r["path"] for r in admitted
-            if not r.get("skipped") and not r.get("truncated")
+            r["path"] for r in admitted if not r.get("skipped") and not r.get("truncated")
         ]
         rg_targets = search_files
 
@@ -434,7 +542,9 @@ def search_code(
     try:
         proc = subprocess.run(
             rg_cmd,
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if proc.returncode == 0:
             for raw_event in proc.stdout.splitlines():
@@ -448,12 +558,14 @@ def search_code(
                 path = data.get("path", {}).get("text", "")
                 line_number = data.get("line_number", 0)
                 line = data.get("lines", {}).get("text", "").rstrip("\r\n")
-                results.append({
-                    "path": path,
-                    "line_number": line_number,
-                    "line": line.strip(),
-                    "context": f"{line_number}: {line}",
-                })
+                results.append(
+                    {
+                        "path": path,
+                        "line_number": line_number,
+                        "line": line.strip(),
+                        "context": f"{line_number}: {line}",
+                    }
+                )
                 if len(results) >= max_results:
                     break
             return results
@@ -479,13 +591,16 @@ def search_code(
                 start = max(0, i - 1)
                 end = min(len(lines), i + 2)
                 context = "\n".join(
-                    f"{start + j + 1}: {lines[start + j]}"
-                    for j in range(end - start)
+                    f"{start + j + 1}: {lines[start + j]}" for j in range(end - start)
                 )
-                results.append({
-                    "path": str(fpath), "line_number": i + 1,
-                    "line": line.strip(), "context": context,
-                })
+                results.append(
+                    {
+                        "path": str(fpath),
+                        "line_number": i + 1,
+                        "line": line.strip(),
+                        "context": context,
+                    }
+                )
                 if len(results) >= max_results:
                     break
 
@@ -514,16 +629,21 @@ def _diff_destination_path(header: str) -> str | None:
 def git_diff_inspect(diff_text: str = "", repo_path: str = "") -> dict[str, Any]:
     """Inspect a git diff or patch."""
     result: dict[str, Any] = {
-        "files_changed": [], "additions": 0,
-        "deletions": 0, "diff_summary": "",
+        "files_changed": [],
+        "additions": 0,
+        "deletions": 0,
+        "diff_summary": "",
     }
 
     diff = diff_text
     if not diff and repo_path:
         try:
             proc = subprocess.run(
-                ["git", "diff", "HEAD"], cwd=repo_path,
-                capture_output=True, text=True, timeout=10,
+                ["git", "diff", "HEAD"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             diff = proc.stdout
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):

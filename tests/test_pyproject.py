@@ -44,11 +44,7 @@ def _get_litellm_deps() -> list[tuple[str, str]]:
     """Return list of (specifier, marker) for each litellm dependency."""
     pyproject = _load_pyproject()
     deps = pyproject["project"]["dependencies"]
-    return [
-        _split_spec_and_marker(d)
-        for d in deps
-        if d.startswith("litellm")
-    ]
+    return [_split_spec_and_marker(d) for d in deps if d.startswith("litellm")]
 
 
 class TestPyprojectDependencies:
@@ -62,9 +58,7 @@ class TestPyprojectDependencies:
             f"Expected exactly 2 litellm entries, found {len(litellm_deps)}: {litellm_deps}"
         )
         for spec, marker in litellm_deps:
-            assert marker, (
-                f"litellm dependency must have a marker, found unconditional: {spec}"
-            )
+            assert marker, f"litellm dependency must have a marker, found unconditional: {spec}"
 
     def test_mutually_exclusive_markers(self) -> None:
         """The two litellm entries must use mutually exclusive python_version markers
@@ -85,16 +79,11 @@ class TestPyprojectDependencies:
         litellm_deps = _get_litellm_deps()
         # Find the entry whose marker contains >= '3.14'
         py314_entry = [
-            (spec, marker) for spec, marker in litellm_deps
-            if ">=" in marker and "3.14" in marker
+            (spec, marker) for spec, marker in litellm_deps if ">=" in marker and "3.14" in marker
         ]
-        assert len(py314_entry) == 1, (
-            f"Expected 1 3.14+ entry, found {py314_entry}"
-        )
+        assert len(py314_entry) == 1, f"Expected 1 3.14+ entry, found {py314_entry}"
         spec, _ = py314_entry[0]
-        assert "<1.92" in spec, (
-            f"Python 3.14+ litellm must be capped <1.92, found: {spec}"
-        )
+        assert "<1.92" in spec, f"Python 3.14+ litellm must be capped <1.92, found: {spec}"
 
     def test_python_below_314_no_upper_cap(self) -> None:
         """The Python <3.14 marker must not impose an upper cap so 1.92.0
@@ -102,19 +91,12 @@ class TestPyprojectDependencies:
         litellm_deps = _get_litellm_deps()
         # Find the entry whose marker contains < '3.14'
         pre_314_entry = [
-            (spec, marker) for spec, marker in litellm_deps
-            if "<" in marker and "3.14" in marker
+            (spec, marker) for spec, marker in litellm_deps if "<" in marker and "3.14" in marker
         ]
-        assert len(pre_314_entry) == 1, (
-            f"Expected 1 <3.14 entry, found {pre_314_entry}"
-        )
+        assert len(pre_314_entry) == 1, f"Expected 1 <3.14 entry, found {pre_314_entry}"
         spec, _ = pre_314_entry[0]
-        assert ">=1.0" in spec, (
-            f"Python <3.14 litellm should allow >=1.0, found: {spec}"
-        )
-        assert "<1.92" not in spec, (
-            f"Python <3.14 must not cap below 1.92, found: {spec}"
-        )
+        assert ">=1.0" in spec, f"Python <3.14 litellm should allow >=1.0, found: {spec}"
+        assert "<1.92" not in spec, f"Python <3.14 must not cap below 1.92, found: {spec}"
 
     def test_requires_python_allows_314(self) -> None:
         """requires-python must not exclude Python 3.14."""
@@ -148,10 +130,10 @@ def _extract_litellm_package_blocks(lock: str) -> list[dict]:
                 if bline == "[[package]]":
                     break
                 block_lines.append(bline)
-                if bline.startswith('name = '):
-                    name = bline.split('=', 1)[1].strip().strip('"')
-                elif bline.startswith('version = '):
-                    version = bline.split('=', 1)[1].strip().strip('"')
+                if bline.startswith("name = "):
+                    name = bline.split("=", 1)[1].strip().strip('"')
+                elif bline.startswith("version = "):
+                    version = bline.split("=", 1)[1].strip().strip('"')
                 elif bline == "wheels = [":
                     in_wheels = True
                 elif in_wheels and bline.startswith("{ url ="):
@@ -160,11 +142,13 @@ def _extract_litellm_package_blocks(lock: str) -> list[dict]:
                     in_wheels = False
                 j += 1
             if name == "litellm":
-                blocks.append({
-                    "version": version,
-                    "wheels": wheels,
-                    "block_text": "\n".join(block_lines),
-                })
+                blocks.append(
+                    {
+                        "version": version,
+                        "wheels": wheels,
+                        "block_text": "\n".join(block_lines),
+                    }
+                )
             i = j
         else:
             i += 1
@@ -209,8 +193,7 @@ class TestUvLockResolution:
         py314_block = [b for b in blocks if b["version"] == "1.91.3"][0]
         wheel_urls = " ".join(py314_block["wheels"])
         assert "py3-none-any" in wheel_urls, (
-            "litellm 1.91.3 must use a pure Python wheel (py3-none-any), "
-            "not a Rust/PyO3 wheel"
+            "litellm 1.91.3 must use a pure Python wheel (py3-none-any), not a Rust/PyO3 wheel"
         )
 
     def test_lockfile_1_92_0_has_cpython_wheels(self) -> None:
@@ -229,7 +212,8 @@ class TestUvLockResolution:
         lock = _load_uv_lock()
         lines = lock.split("\n")
         litellm_requires = [
-            line.strip() for line in lines
+            line.strip()
+            for line in lines
             if "litellm" in line and "marker" in line and "requires-dist" not in line
         ]
         assert len(litellm_requires) >= 2, (
@@ -249,7 +233,8 @@ class TestUvLockResolution:
         lock = _load_uv_lock()
         lines = lock.split("\n")
         litellm_dep_lines = [
-            line.strip() for line in lines
+            line.strip()
+            for line in lines
             if "litellm" in line and "version" in line and "marker" in line
         ]
         assert len(litellm_dep_lines) >= 2, (
@@ -264,12 +249,8 @@ class TestUvLockResolution:
             if "1.92.0" in line and "<" in line and "3.14" in line:
                 found_pre_314 = True
 
-        assert found_314, (
-            "Lockfile must pair litellm 1.91.3 with python_full_version >= '3.14'"
-        )
-        assert found_pre_314, (
-            "Lockfile must pair litellm 1.92.0 with python_full_version < '3.14'"
-        )
+        assert found_314, "Lockfile must pair litellm 1.91.3 with python_full_version >= '3.14'"
+        assert found_pre_314, "Lockfile must pair litellm 1.92.0 with python_full_version < '3.14'"
 
 
 @pytest.fixture

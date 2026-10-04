@@ -250,9 +250,7 @@ def test_build_repair_prompt_includes_attempt_tracking():
         filename="test.rb",
     )
     validation = ValidationResult(is_valid=False, errors=["syntax error"])
-    prompt = _build_repair_prompt(
-        artifact, validation, attempt=1, max_attempts=3
-    )
+    prompt = _build_repair_prompt(artifact, validation, attempt=1, max_attempts=3)
     assert "repair attempt 1 of 3" in prompt.lower()
     assert "3 attempt(s) remain" in prompt.lower()
 
@@ -267,9 +265,7 @@ def test_build_repair_prompt_includes_recurring_error_guidance():
         filename="test.rb",
     )
     validation = ValidationResult(is_valid=False, errors=["syntax error"])
-    prompt = _build_repair_prompt(
-        artifact, validation, attempt=2, max_attempts=3
-    )
+    prompt = _build_repair_prompt(artifact, validation, attempt=2, max_attempts=3)
     assert "different approach" in prompt.lower()
     assert "non-ruby text" in prompt.lower()
 
@@ -292,9 +288,12 @@ def test_build_repair_prompt_omits_attempt_info_when_default():
 def test_generate_artifact_logs_refusal_on_empty_code(monkeypatch, capsys):
     """Empty code extraction triggers refusal warning, not silent stub (issue #74)."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    _install_litellm(monkeypatch, lambda **_kw: SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content="I cannot help with that."))]
-    ))
+    _install_litellm(
+        monkeypatch,
+        lambda **_kw: SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="I cannot help with that."))]
+        ),
+    )
 
     artifact = generate_artifact(
         VulnerabilityInput(cve_id="CVE-2021-44228"),
@@ -310,9 +309,12 @@ def test_generate_artifact_logs_refusal_on_empty_code(monkeypatch, capsys):
 def test_repair_artifact_logs_refusal_on_empty_code(monkeypatch, capsys):
     """Empty repair code triggers refusal warning and returns original artifact (issue #74)."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    _install_litellm(monkeypatch, lambda **_kw: SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content="I cannot help with that."))]
-    ))
+    _install_litellm(
+        monkeypatch,
+        lambda **_kw: SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="I cannot help with that."))]
+        ),
+    )
 
     original = Artifact(
         artifact_type=ArtifactType.METASPLOIT,
@@ -352,9 +354,7 @@ def test_explicit_stub_mode_marks_artifact(monkeypatch):
         (ArtifactType.ZAP_PASSIVE, "_zap_passive.js", "function scan(ps, msg, src)"),
     ],
 )
-def test_stub_generation_preserves_zap_artifact_type(
-    monkeypatch, artifact_type, suffix, signature
-):
+def test_stub_generation_preserves_zap_artifact_type(monkeypatch, artifact_type, suffix, signature):
     monkeypatch.setenv("ZERO_FORGE_STUB_MODE", "true")
 
     artifact = generate_artifact(
@@ -602,17 +602,18 @@ def _install_async_litellm(monkeypatch, acompletion) -> None:
     existing = sys.modules.get("litellm")
     completion = getattr(existing, "completion", None)
     monkeypatch.setitem(
-        sys.modules, "litellm",
+        sys.modules,
+        "litellm",
         SimpleNamespace(completion=completion, acompletion=acompletion),
     )
 
 
 def _async_response(content: str):
     """Create a fake async acompletion that returns *content*."""
+
     async def _acompletion(**_kw):
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
-        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
     return _acompletion
 
 
@@ -621,9 +622,7 @@ def test_generate_artifact_async_normal_output(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     _install_async_litellm(
         monkeypatch,
-        _async_response(
-            "```ruby\nclass MetasploitModule\nend\n```"
-        ),
+        _async_response("```ruby\nclass MetasploitModule\nend\n```"),
     )
 
     coro = generate_artifact_async(
@@ -647,11 +646,13 @@ def test_generate_artifact_async_on_chunk_forwarding(monkeypatch):
     _install_async_litellm(monkeypatch, _async_streaming_acompletion("hello world"))
 
     chunks: list[str] = []
-    artifact = asyncio.run(generate_artifact_async(
-        VulnerabilityInput(cve_id="CVE-2021-44228"),
-        _context(),
-        on_chunk=chunks.append,
-    ))
+    artifact = asyncio.run(
+        generate_artifact_async(
+            VulnerabilityInput(cve_id="CVE-2021-44228"),
+            _context(),
+            on_chunk=chunks.append,
+        )
+    )
 
     assert "hello world" in artifact.content
     assert len(chunks) > 0
@@ -665,10 +666,12 @@ def test_generate_artifact_async_stub_mode(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
-    artifact = asyncio.run(generate_artifact_async(
-        VulnerabilityInput(cve_id="CVE-2021-44228"),
-        _context(),
-    ))
+    artifact = asyncio.run(
+        generate_artifact_async(
+            VulnerabilityInput(cve_id="CVE-2021-44228"),
+            _context(),
+        )
+    )
 
     assert artifact.metadata["stub"] is True
     assert "MetasploitModule" in artifact.content
@@ -682,10 +685,12 @@ def test_generate_artifact_async_refusal(monkeypatch, capsys):
         _async_response("I cannot help with that."),
     )
 
-    artifact = asyncio.run(generate_artifact_async(
-        VulnerabilityInput(cve_id="CVE-2021-44228"),
-        _context(),
-    ))
+    artifact = asyncio.run(
+        generate_artifact_async(
+            VulnerabilityInput(cve_id="CVE-2021-44228"),
+            _context(),
+        )
+    )
 
     assert "ZeroForge WARNING" in artifact.content
     assert "refusal" in artifact.content.lower()
@@ -698,9 +703,7 @@ def test_repair_artifact_async_normal_output(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     _install_async_litellm(
         monkeypatch,
-        _async_response(
-            "```ruby\nclass MetasploitModule\nend\n```"
-        ),
+        _async_response("```ruby\nclass MetasploitModule\nend\n```"),
     )
 
     original = Artifact(
@@ -792,9 +795,7 @@ def test_repair_artifact_async_stub_mode(monkeypatch):
         (ArtifactType.ZAP_PASSIVE, "_zap_passive.js", "function scan(ps, msg, src)"),
     ],
 )
-def test_generate_artifact_async_artifact_type_parity(
-    monkeypatch, artifact_type, suffix, marker
-):
+def test_generate_artifact_async_artifact_type_parity(monkeypatch, artifact_type, suffix, marker):
     """generate_artifact_async produces correct output for each artifact type."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     _install_async_litellm(
@@ -802,10 +803,12 @@ def test_generate_artifact_async_artifact_type_parity(
         _async_response(f"```{artifact_type.value}\n{marker}\n```"),
     )
 
-    artifact = asyncio.run(generate_artifact_async(
-        VulnerabilityInput(cve_id="CVE-2021-44228", artifact_type=artifact_type),
-        _context(),
-    ))
+    artifact = asyncio.run(
+        generate_artifact_async(
+            VulnerabilityInput(cve_id="CVE-2021-44228", artifact_type=artifact_type),
+            _context(),
+        )
+    )
 
     assert artifact.artifact_type == artifact_type
     assert artifact.filename.endswith(suffix)
@@ -830,10 +833,12 @@ def test_sync_async_generation_metadata_parity(monkeypatch):
         VulnerabilityInput(cve_id="CVE-2021-44228"),
         _context(),
     )
-    async_artifact = asyncio.run(generate_artifact_async(
-        VulnerabilityInput(cve_id="CVE-2021-44228"),
-        _context(),
-    ))
+    async_artifact = asyncio.run(
+        generate_artifact_async(
+            VulnerabilityInput(cve_id="CVE-2021-44228"),
+            _context(),
+        )
+    )
 
     assert sync_artifact.metadata.keys() == async_artifact.metadata.keys()
     assert sync_artifact.filename == async_artifact.filename
@@ -846,7 +851,11 @@ def test_sync_async_repair_content_parity(monkeypatch):
     _install_litellm(
         monkeypatch,
         lambda **_kw: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="```ruby\nclass MetasploitModule\nend\n```"))]
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content="```ruby\nclass MetasploitModule\nend\n```")
+                )
+            ]
         ),
     )
     _install_async_litellm(
@@ -872,11 +881,18 @@ def test_sync_async_repair_content_parity(monkeypatch):
 
 def _async_streaming_acompletion(content: str):
     """Create an async acompletion mock that streams *content* as chunks."""
+
     class _FakeChunk:
         def __init__(self, c):
-            self.choices = [type("C", (), {
-                "delta": type("D", (), {"content": c})(),
-            })()]
+            self.choices = [
+                type(
+                    "C",
+                    (),
+                    {
+                        "delta": type("D", (), {"content": c})(),
+                    },
+                )()
+            ]
 
     async def _acompletion(**kwargs):
         async def _gen():
@@ -885,6 +901,7 @@ def _async_streaming_acompletion(content: str):
                 yield _FakeChunk(word)
                 if i < len(words) - 1:
                     yield _FakeChunk(" ")
+
         return _gen()
 
     return _acompletion

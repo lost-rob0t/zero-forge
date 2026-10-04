@@ -249,9 +249,7 @@ def web_search(
         elif os.environ.get("TAVILY_API_KEY", "").strip():
             selected = "tavily"
         else:
-            raise RuntimeError(
-                "web search requires BRAVE_SEARCH_API_KEY or TAVILY_API_KEY"
-            )
+            raise RuntimeError("web search requires BRAVE_SEARCH_API_KEY or TAVILY_API_KEY")
 
     if selected == "brave":
         return _brave_search(

@@ -82,10 +82,7 @@ def _normalize_context(
 
     notes = context.extra_notes
     if records:
-        notes = (
-            f"{notes}\nPoC selection decisions: "
-            f"{json.dumps(records, sort_keys=True)}"
-        ).strip()
+        notes = (f"{notes}\nPoC selection decisions: {json.dumps(records, sort_keys=True)}").strip()
     return (
         context.model_copy(
             update={
@@ -98,11 +95,7 @@ def _normalize_context(
 
 
 def _rejection_comment(artifact_type: ArtifactType, message: str) -> str:
-    prefix = (
-        "//"
-        if artifact_type in {ArtifactType.ZAP_ACTIVE, ArtifactType.ZAP_PASSIVE}
-        else "#"
-    )
+    prefix = "//" if artifact_type in {ArtifactType.ZAP_ACTIVE, ArtifactType.ZAP_PASSIVE} else "#"
     return f"{prefix} ZeroForge rejected generated artifact: {message}\n"
 
 
@@ -157,9 +150,7 @@ def _build_edit_prompt(
         *(f"- {error}" for error in validation.errors),
     ]
     if validation.warnings:
-        parts.extend(
-            ["## Warnings", *(f"- {warning}" for warning in validation.warnings)]
-        )
+        parts.extend(["## Warnings", *(f"- {warning}" for warning in validation.warnings)])
     if context.extra_notes:
         parts.append(f"## Context Notes\n{context.extra_notes}")
     parts.extend(
@@ -206,9 +197,7 @@ def _build_edit_prompt(
 def _legacy_full_replacement_plan(raw: str, artifact: Artifact) -> dict[str, Any]:
     code = legacy._extract_code_block(raw, artifact.artifact_type)
     if not code.strip():
-        raise ArtifactEditError(
-            "repair output did not contain an edit plan or artifact content"
-        )
+        raise ArtifactEditError("repair output did not contain an edit plan or artifact content")
     return {
         "base_sha256": artifact_sha256(artifact.content),
         "edits": [{"old": artifact.content, "new": code}],

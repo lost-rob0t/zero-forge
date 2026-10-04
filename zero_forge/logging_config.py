@@ -56,10 +56,10 @@ def _resolve_level(name: str) -> int:
     key = name.strip().upper()
     if key not in _VALID_LEVELS:
         raise ValueError(
-            f"Unknown log level: {name!r}. "
-            f"Valid levels: {', '.join(sorted(_VALID_LEVELS))}"
+            f"Unknown log level: {name!r}. Valid levels: {', '.join(sorted(_VALID_LEVELS))}"
         )
     return _VALID_LEVELS[key]
+
 
 # --- logger namespace ----------------------------------------------------
 
@@ -78,6 +78,7 @@ def get_logger(name: str | None = None) -> logging.Logger:
     if name.startswith(_ROOT_LOGGER_NAME + ".") or name == _ROOT_LOGGER_NAME:
         return logging.getLogger(name)
     return logging.getLogger(f"{_ROOT_LOGGER_NAME}.{name}")
+
 
 # --- setup ---------------------------------------------------------------
 

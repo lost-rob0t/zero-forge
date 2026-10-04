@@ -324,9 +324,9 @@ def test_zap_passive_examples_validate(path):
 
 
 def test_zap_active_rejects_invalid_javascript_syntax():
-    content = (
-        default_examples_root() / "zap" / "active" / "reflected_input.js"
-    ).read_text(encoding="utf-8")
+    content = (default_examples_root() / "zap" / "active" / "reflected_input.js").read_text(
+        encoding="utf-8"
+    )
     content = content.replace(
         'const attack = "zf-reflection-8f7d3c";',
         'const broken = ([)];\n  const attack = "zf-reflection-8f7d3c";',
@@ -339,9 +339,9 @@ def test_zap_active_rejects_invalid_javascript_syntax():
 
 
 def test_zap_active_rejects_invalid_metadata_yaml():
-    content = (
-        default_examples_root() / "zap" / "active" / "reflected_input.js"
-    ).read_text(encoding="utf-8")
+    content = (default_examples_root() / "zap" / "active" / "reflected_input.js").read_text(
+        encoding="utf-8"
+    )
     content = content.replace(
         "references:\n  - https://www.zaproxy.org/docs/desktop/addons/script-console/",
         "references: [unterminated",
@@ -354,9 +354,9 @@ def test_zap_active_rejects_invalid_metadata_yaml():
 
 
 def test_zap_active_requires_category_metadata():
-    content = (
-        default_examples_root() / "zap" / "active" / "reflected_input.js"
-    ).read_text(encoding="utf-8")
+    content = (default_examples_root() / "zap" / "active" / "reflected_input.js").read_text(
+        encoding="utf-8"
+    )
     content = content.replace("category: injection\n", "")
 
     result = validate_zap_active_scan(content)
@@ -383,8 +383,7 @@ def test_zap_passive_rejects_network_side_effects():
     )
     content = content.replace(
         "const responseHeader = msg.getResponseHeader();",
-        "as.sendAndReceive(msg, false, false);\n"
-        "  const responseHeader = msg.getResponseHeader();",
+        "as.sendAndReceive(msg, false, false);\n  const responseHeader = msg.getResponseHeader();",
     )
 
     result = validate_zap_passive_scan(content)
@@ -419,7 +418,7 @@ def _make_active_rule(
     baseline_line = "  const baselineBody = msg.getResponseBody().toString();"
     if no_baseline:
         baseline_line = ""
-    template = f'''const ScanRuleMetadata = Java.type(
+    template = f"""const ScanRuleMetadata = Java.type(
   "org.zaproxy.addon.commonlib.scanrules.ScanRuleMetadata"
 );
 
@@ -463,7 +462,7 @@ function scan(as, msg, param, value) {{
     .setMessage(probe)
     .raise();
 }}
-'''
+"""
     if swap_order == "send_before_clone":
         template = template.replace(
             "  const probe = msg.cloneRequest();\n  as.setParam(probe, param, attack);\n  as.sendAndReceive(probe, false, false);",
@@ -543,9 +542,7 @@ def test_active_lifecycle_no_baseline_warns():
 def test_active_lifecycle_inspection_before_send_fails():
     """Inspection after sendAndReceive is required; removing it must fail."""
     content = _make_active_rule()
-    content = content.replace(
-        "  const body = probe.getResponseBody().toString();\n", ""
-    )
+    content = content.replace("  const body = probe.getResponseBody().toString();\n", "")
     result = validate_zap_active_scan(content)
     assert result["is_valid"] is False
     assert any("inspect the probe response" in e for e in result["errors"])
@@ -612,10 +609,7 @@ def test_passive_rejects_function_constructor():
 
 def test_passive_rejects_java_network_class():
     content = _make_passive_rule()
-    content = content.replace(
-        "return;",
-        'const s = Java.type("java.net.Socket"); return;'
-    )
+    content = content.replace("return;", 'const s = Java.type("java.net.Socket"); return;')
     result = validate_zap_passive_scan(content)
     assert result["is_valid"] is False
     assert any("Java network" in e for e in result["errors"])
@@ -672,9 +666,9 @@ def test_node_preflight_missing_is_actionable():
 
 
 def test_zap_validation_fails_closed_without_node():
-    content = (
-        default_examples_root() / "zap" / "passive" / "missing_csp.js"
-    ).read_text(encoding="utf-8")
+    content = (default_examples_root() / "zap" / "passive" / "missing_csp.js").read_text(
+        encoding="utf-8"
+    )
     with patch("zero_forge.tools.validator.shutil.which", return_value=None):
         result = validate_zap_passive_scan(content)
 
@@ -772,7 +766,9 @@ def test_temp_file_removed_after_syntax_check(monkeypatch):
         created_paths.append(f.name)
         return f
 
-    monkeypatch.setattr("zero_forge.tools.validator.tempfile.NamedTemporaryFile", tracking_named_temp)
+    monkeypatch.setattr(
+        "zero_forge.tools.validator.tempfile.NamedTemporaryFile", tracking_named_temp
+    )
 
     runner = DefaultRubyRunner()
     try:
@@ -794,7 +790,9 @@ def test_temp_file_removed_after_ast_analysis(monkeypatch):
         created_paths.append(f.name)
         return f
 
-    monkeypatch.setattr("zero_forge.tools.validator.tempfile.NamedTemporaryFile", tracking_named_temp)
+    monkeypatch.setattr(
+        "zero_forge.tools.validator.tempfile.NamedTemporaryFile", tracking_named_temp
+    )
 
     runner = DefaultRubyRunner()
     try:
@@ -936,7 +934,9 @@ end
     def test_real_ast_timeout_fails_closed(self):
         """Patch DefaultRubyRunner.analyze_ast to raise TimeoutExpired."""
         runner = DefaultRubyRunner()
-        with patch.object(runner, "analyze_ast", side_effect=subprocess.TimeoutExpired(cmd="ruby", timeout=1)):
+        with patch.object(
+            runner, "analyze_ast", side_effect=subprocess.TimeoutExpired(cmd="ruby", timeout=1)
+        ):
             result = validate_metasploit(VALID_MODULE, ruby_runner=runner)
             assert result["is_valid"] is False
             assert any("timed out" in e for e in result["errors"])

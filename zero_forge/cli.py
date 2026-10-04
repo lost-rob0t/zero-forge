@@ -155,9 +155,7 @@ def _resolve_output_formats(values: list[str], all_formats: bool) -> list[str]:
     for value in values:
         lowered = value.strip().lower()
         if lowered not in allowed:
-            raise typer.BadParameter(
-                f"unsupported format '{value}'; choose markdown, org, or json"
-            )
+            raise typer.BadParameter(f"unsupported format '{value}'; choose markdown, org, or json")
         if lowered not in normalized:
             normalized.append(lowered)
     return normalized
@@ -212,12 +210,8 @@ def generate(
         False, "--all", help="Generate artifacts for every supported type (overrides --type)"
     ),
     poc_file: str = typer.Option("", "--poc", "-p", help="Path to proof-of-concept file"),
-    writeup_file: str = typer.Option(
-        "", "--writeup", "-w", help="Path to vulnerability write-up"
-    ),
-    source_path: str = typer.Option(
-        "", "--source", "-s", help="Path to vulnerable source code"
-    ),
+    writeup_file: str = typer.Option("", "--writeup", "-w", help="Path to vulnerability write-up"),
+    source_path: str = typer.Option("", "--source", "-s", help="Path to vulnerable source code"),
     patch_file: str = typer.Option("", "--patch", "-d", help="Path to patch/diff file"),
     output_dir: str = typer.Option(
         "", "--output", "-o", help="Output directory (overrides config)"
@@ -261,9 +255,7 @@ def generate(
 
 @app.command("draft")
 def draft_exploit(
-    candidate_file: str = typer.Option(
-        ..., "--candidate", help="Path to CandidateFinding JSON"
-    ),
+    candidate_file: str = typer.Option(..., "--candidate", help="Path to CandidateFinding JSON"),
     hypothesis_file: str = typer.Option(
         ..., "--hypothesis", help="Path to SecurityHypothesis JSON"
     ),
@@ -273,9 +265,7 @@ def draft_exploit(
         "-t",
         help="metasploit, python, zap_active, or zap_passive",
     ),
-    source_path: str = typer.Option(
-        "", "--source", "-s", help="Optional authorized source tree"
-    ),
+    source_path: str = typer.Option("", "--source", "-s", help="Optional authorized source tree"),
     web_queries: list[str] = _WEB_QUERIES_OPTION,
     output_formats: list[str] = _OUTPUT_FORMATS_OPTION,
     all_formats: bool = typer.Option(
@@ -366,9 +356,7 @@ def tools() -> None:
 @app.command()
 def validate(
     file: str = typer.Argument(..., help="Path to artifact file"),
-    artifact_type: str = typer.Option(
-        "metasploit", "--type", "-t", help="Artifact type"
-    ),
+    artifact_type: str = typer.Option("metasploit", "--type", "-t", help="Artifact type"),
 ) -> None:
     """Validate an existing artifact file."""
     from .agents.tool_agent import ToolAgent

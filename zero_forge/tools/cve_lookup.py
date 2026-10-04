@@ -33,16 +33,12 @@ def _parse_nvd_response(data: dict[str, Any], cve_id: str) -> CveLookupResult:
             result.description = d.get("value", "")
             break
 
-    result.references = [
-        r.get("url", "") for r in cve_item.get("references", [])
-    ]
+    result.references = [r.get("url", "") for r in cve_item.get("references", [])]
 
     metrics = cve_item.get("metrics", {})
     for key in ("cvssMetricV31", "cvssMetricV30"):
         if key in metrics and metrics[key]:
-            result.cvss = str(
-                metrics[key][0].get("cvssData", {}).get("baseScore", "")
-            )
+            result.cvss = str(metrics[key][0].get("cvssData", {}).get("baseScore", ""))
             break
 
     result.published = cve_item.get("published", "")
@@ -103,9 +99,7 @@ def _classify_error(exc: Exception) -> tuple[CveLookupStatus, str, str]:
 def _attempt_lookup(cve_id: str, timeout: int) -> CveLookupResult:
     """Make a single NVD API request and return a typed result."""
     url = NVD_API_URL.format(cve_id=cve_id)
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "ZeroForge/0.1"}
-    )
+    req = urllib.request.Request(url, headers={"User-Agent": "ZeroForge/0.1"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -150,10 +144,7 @@ def cve_lookup(cve_id: str, timeout: int = 15) -> dict[str, Any]:
         else:
             # Exhausted retries
             result.status = CveLookupStatus.PERMANENT_FAILURE
-            result.error_message = (
-                f"{result.error_message}"
-                f" (exhausted {_MAX_RETRIES} retries)"
-            )
+            result.error_message = f"{result.error_message} (exhausted {_MAX_RETRIES} retries)"
             return result.to_dict()
 
     return CveLookupResult(

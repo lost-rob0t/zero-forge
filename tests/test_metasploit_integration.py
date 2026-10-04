@@ -16,9 +16,9 @@ msfconsole_available = shutil.which("msfconsole") is not None
     reason="Ruby and msfconsole are required for Metasploit load integration",
 )
 def test_reference_module_loads_in_metasploit_framework():
-    module = (
-        default_examples_root() / "metasploit" / "http_command_injection.rb"
-    ).read_text(encoding="utf-8")
+    module = (default_examples_root() / "metasploit" / "http_command_injection.rb").read_text(
+        encoding="utf-8"
+    )
 
     result = validate_metasploit_loadable(module)
 

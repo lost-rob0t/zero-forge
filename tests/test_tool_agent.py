@@ -120,13 +120,16 @@ def test_tool_agent_collect_context_skips_cve_lookup_when_empty(monkeypatch):
     registry = ToolRegistry()
     registry.register(
         "cve_lookup",
-        lambda cve_id, timeout=15: lookup_called.append(cve_id) or {
-            "cve_id": cve_id,
-            "description": "",
-            "references": [],
-            "cvss": "",
-            "published": "",
-        },
+        lambda cve_id, timeout=15: (
+            lookup_called.append(cve_id)
+            or {
+                "cve_id": cve_id,
+                "description": "",
+                "references": [],
+                "cvss": "",
+                "published": "",
+            }
+        ),
     )
     context = ToolAgent(registry).collect_context(
         VulnerabilityInput(
@@ -210,9 +213,7 @@ def test_tool_agent_repairs_malformed_json(monkeypatch):
     registry = ToolRegistry()
     registry.register("noop", lambda: "done")
 
-    result = ToolAgent(registry).run(
-        ToolRequest(objective="Do nothing", allowed_tools=["noop"])
-    )
+    result = ToolAgent(registry).run(ToolRequest(objective="Do nothing", allowed_tools=["noop"]))
 
     assert result.output == "done"
     assert len(requests) == 2
@@ -241,9 +242,7 @@ def test_tool_agent_repairs_disallowed_tool(monkeypatch):
     registry.register("noop", lambda: "done")
     registry.register("forbidden", lambda: "bad")
 
-    result = ToolAgent(registry).run(
-        ToolRequest(objective="Do nothing", allowed_tools=["noop"])
-    )
+    result = ToolAgent(registry).run(ToolRequest(objective="Do nothing", allowed_tools=["noop"]))
 
     assert result.output == "done"
     assert "disallowed tool 'forbidden'" in requests[1][-1]["content"]
@@ -376,9 +375,7 @@ def test_tool_agent_repairs_empty_response(monkeypatch):
     registry = ToolRegistry()
     registry.register("noop", lambda: "done")
 
-    result = ToolAgent(registry).run(
-        ToolRequest(objective="Do nothing", allowed_tools=["noop"])
-    )
+    result = ToolAgent(registry).run(ToolRequest(objective="Do nothing", allowed_tools=["noop"]))
 
     assert result.output == "done"
     assert len(requests[1]) == 3

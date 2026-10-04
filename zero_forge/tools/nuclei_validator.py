@@ -135,8 +135,7 @@ def _validate_schema(template: dict[str, Any]) -> tuple[list[str], list[str], li
             )
         ):
             errors.append(
-                "Nuclei template info.reference must be a string or non-empty "
-                "string list"
+                "Nuclei template info.reference must be a string or non-empty string list"
             )
 
     protocols = sorted(key for key in _NUCLEI_PROTOCOL_KEYS if key in template)

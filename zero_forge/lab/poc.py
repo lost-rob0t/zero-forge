@@ -51,7 +51,5 @@ def collect_exploitdb(
         provenance.append(f"CVE: {cve_id}" if cve_id else f"Query: {query}")
         provenance.extend([f"Title: {title}", f"Source: {source}", "", content])
         sections.append("\n".join(provenance).rstrip())
-    destination.write_text(
-        "\n\n".join(sections) + ("\n" if sections else ""), encoding="utf-8"
-    )
+    destination.write_text("\n\n".join(sections) + ("\n" if sections else ""), encoding="utf-8")
     return PocCollection(path=destination, result_count=len(rows))
