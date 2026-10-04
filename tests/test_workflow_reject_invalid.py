@@ -103,7 +103,9 @@ def _run_workflow_with_mocks(
 
     with (
         patch("zero_forge.workflow.ToolAgent", return_value=mock_tool_agent),
-        patch("zero_forge.workflow.generate_artifact", return_value=_make_artifact(artifact_content)),
+        patch(
+            "zero_forge.workflow.generate_artifact", return_value=_make_artifact(artifact_content)
+        ),
         patch("zero_forge.workflow.repair_artifact", return_value=_make_artifact(artifact_content)),
         patch.dict("os.environ", {"ZERO_FORGE_OUTPUT_DIR": str(tmp_path)}),
     ):

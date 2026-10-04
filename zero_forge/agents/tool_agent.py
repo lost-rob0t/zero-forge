@@ -359,8 +359,7 @@ class ToolAgent:
                         )
                 elif lookup_status == "not_found":
                     ctx.extra_notes = (
-                        "CVE lookup: not found in NVD."
-                        " Proceeding with user-supplied context only."
+                        "CVE lookup: not found in NVD. Proceeding with user-supplied context only."
                     )
                 else:
                     error_category = cve_data.get("error_category", "unknown")

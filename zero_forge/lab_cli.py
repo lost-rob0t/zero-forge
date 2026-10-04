@@ -51,9 +51,7 @@ def register_lab_commands(
             case_sensitive=False,
         ),
     )
-    poc_output_option = cast(
-        Path, typer.Option(..., "--output", help="Destination directory")
-    )
+    poc_output_option = cast(Path, typer.Option(..., "--output", help="Destination directory"))
     run_dir_option = cast(
         Path, typer.Option(..., "--run", help="Completed native lab run directory")
     )

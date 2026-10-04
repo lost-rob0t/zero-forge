@@ -81,9 +81,6 @@ def resolve_model_limits(model: str, provider: str, api_key: str | None) -> int 
     return result
 
 
-
-
-
 @dataclass(frozen=True)
 class ResolvedModel:
     role: str
@@ -191,8 +188,7 @@ def resolve_model(role: str, config: ModelConfig) -> ResolvedModel:
 def _is_retryable_provider_error(exc: Exception) -> bool:
     name = type(exc).__name__.lower()
     return any(
-        marker in name
-        for marker in ("timeout", "ratelimit", "connection", "serviceunavailable")
+        marker in name for marker in ("timeout", "ratelimit", "connection", "serviceunavailable")
     )
 
 
@@ -257,15 +253,19 @@ def call_model(
         env_var = f"ZERO_FORGE_{role.upper()}_MAX_TOKENS"
         if not os.environ.get(env_var):
             inferred = resolve_model_limits(
-                resolved.model, resolved.provider, resolved.api_key,
+                resolved.model,
+                resolved.provider,
+                resolved.api_key,
             )
             if inferred is not None:
                 max_tokens = min(inferred, config.inferred_max_token_cap)
                 logger.debug(
-                    "Auto-inferred max_tokens=%d for role=%s model=%s "
-                    "(inferred=%d, cap=%d)",
-                    max_tokens, role, resolved.model,
-                    inferred, config.inferred_max_token_cap,
+                    "Auto-inferred max_tokens=%d for role=%s model=%s (inferred=%d, cap=%d)",
+                    max_tokens,
+                    role,
+                    resolved.model,
+                    inferred,
+                    config.inferred_max_token_cap,
                 )
 
     import litellm
@@ -275,8 +275,14 @@ def call_model(
         logger.trace(  # type: ignore[attr-defined]
             "LLM request role=%s provider=%s model=%s attempt=%d/%d "
             "max_tokens=%d system_prompt=%r user_prompt=%.500r",
-            role, resolved.provider, resolved.model, current_attempt,
-            max_attempts, current_max_tokens, system_prompt, user_prompt,
+            role,
+            resolved.provider,
+            resolved.model,
+            current_attempt,
+            max_attempts,
+            current_max_tokens,
+            system_prompt,
+            user_prompt,
         )
 
         try:
@@ -290,10 +296,12 @@ def call_model(
             )
         except Exception as exc:
             logger.error(
-                "LLM request failed role=%s provider=%s model=%s "
-                "error_type=%s retryable=%s",
-                role, resolved.provider, resolved.model,
-                type(exc).__name__, _is_retryable_provider_error(exc),
+                "LLM request failed role=%s provider=%s model=%s error_type=%s retryable=%s",
+                role,
+                resolved.provider,
+                resolved.model,
+                type(exc).__name__,
+                _is_retryable_provider_error(exc),
             )
             raise LLMProviderError(
                 f"LLM request failed with {type(exc).__name__}",
@@ -310,7 +318,9 @@ def call_model(
         except (AttributeError, IndexError, KeyError, TypeError) as exc:
             logger.error(
                 "LLM response missing message role=%s provider=%s model=%s",
-                role, resolved.provider, resolved.model,
+                role,
+                resolved.provider,
+                resolved.model,
             )
             raise LLMResponseError(
                 "LLM response did not contain a message",
@@ -325,7 +335,10 @@ def call_model(
         if isinstance(content, str) and content.strip():
             logger.trace(  # type: ignore[attr-defined]
                 "LLM response role=%s provider=%s model=%s content=%.1000r",
-                role, resolved.provider, resolved.model, content,
+                role,
+                resolved.provider,
+                resolved.model,
+                content,
             )
             return content
 
@@ -339,9 +352,14 @@ def call_model(
                     "LLM token exhaustion (finish_reason=length) "
                     "role=%s provider=%s model=%s attempt=%d/%d "
                     "max_tokens=%d reasoning_tokens=%s; retrying with %d",
-                    role, resolved.provider, resolved.model, current_attempt,
-                    max_attempts, current_max_tokens,
-                    reasoning_tokens, new_max,
+                    role,
+                    resolved.provider,
+                    resolved.model,
+                    current_attempt,
+                    max_attempts,
+                    current_max_tokens,
+                    reasoning_tokens,
+                    new_max,
                 )
                 current_max_tokens = new_max
                 continue
@@ -349,8 +367,11 @@ def call_model(
                 "LLM token exhaustion (finish_reason=length) after all "
                 "attempts role=%s provider=%s model=%s "
                 "max_tokens=%d reasoning_tokens=%s",
-                role, resolved.provider, resolved.model,
-                current_max_tokens, reasoning_tokens,
+                role,
+                resolved.provider,
+                resolved.model,
+                current_max_tokens,
+                reasoning_tokens,
             )
             raise LLMResponseError(
                 "Token budget exhausted on reasoning "
@@ -364,9 +385,11 @@ def call_model(
             )
 
         logger.error(
-            "LLM response empty role=%s provider=%s model=%s "
-            "finish_reason=%s",
-            role, resolved.provider, resolved.model, finish_reason,
+            "LLM response empty role=%s provider=%s model=%s finish_reason=%s",
+            role,
+            resolved.provider,
+            resolved.model,
+            finish_reason,
         )
         raise LLMResponseError(
             "LLM response contained empty message content",
@@ -414,9 +437,7 @@ async def _resolve_openrouter_limit_async(model_id: str) -> int | None:
     return None
 
 
-async def resolve_model_limits_async(
-    model: str, provider: str, api_key: str | None
-) -> int | None:
+async def resolve_model_limits_async(model: str, provider: str, api_key: str | None) -> int | None:
     """Async variant of resolve_model_limits using httpx."""
     cache_key = f"{provider}:{model}"
     if cache_key in _MODEL_LIMITS_CACHE:
@@ -479,15 +500,19 @@ async def call_model_async(
         env_var = f"ZERO_FORGE_{role.upper()}_MAX_TOKENS"
         if not os.environ.get(env_var):
             inferred = await resolve_model_limits_async(
-                resolved.model, resolved.provider, resolved.api_key,
+                resolved.model,
+                resolved.provider,
+                resolved.api_key,
             )
             if inferred is not None:
                 max_tokens = min(inferred, config.inferred_max_token_cap)
                 logger.debug(
-                    "Auto-inferred max_tokens=%d for role=%s model=%s "
-                    "(inferred=%d, cap=%d)",
-                    max_tokens, role, resolved.model,
-                    inferred, config.inferred_max_token_cap,
+                    "Auto-inferred max_tokens=%d for role=%s model=%s (inferred=%d, cap=%d)",
+                    max_tokens,
+                    role,
+                    resolved.model,
+                    inferred,
+                    config.inferred_max_token_cap,
                 )
 
     import litellm
@@ -684,7 +709,9 @@ async def stream_model(
         env_var = f"ZERO_FORGE_{role.upper()}_MAX_TOKENS"
         if not os.environ.get(env_var):
             inferred = await resolve_model_limits_async(
-                resolved.model, resolved.provider, resolved.api_key,
+                resolved.model,
+                resolved.provider,
+                resolved.api_key,
             )
             if inferred is not None:
                 max_tokens = min(inferred, config.inferred_max_token_cap)

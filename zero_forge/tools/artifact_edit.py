@@ -41,14 +41,10 @@ def parse_artifact_edit_plan(text: str) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise ArtifactEditError(f"Artifact edit response is not valid JSON: {exc}") from exc
     if not isinstance(payload, dict) or set(payload) != {"base_sha256", "edits"}:
-        raise ArtifactEditError(
-            "Artifact edit response must contain exactly base_sha256 and edits"
-        )
+        raise ArtifactEditError("Artifact edit response must contain exactly base_sha256 and edits")
     base_sha256 = payload.get("base_sha256")
     edits = payload.get("edits")
-    if not isinstance(base_sha256, str) or not re.fullmatch(
-        r"[0-9a-f]{64}", base_sha256
-    ):
+    if not isinstance(base_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", base_sha256):
         raise ArtifactEditError("base_sha256 must be a lowercase SHA-256 digest")
     if not isinstance(edits, list) or not edits or len(edits) > _MAX_EDITS:
         raise ArtifactEditError(f"edits must contain between 1 and {_MAX_EDITS} entries")
@@ -82,16 +78,10 @@ def artifact_root_counts(content: str, artifact_type: str) -> dict[str, int]:
     """Count required top-level roots for one supported artifact."""
     normalized = artifact_type.strip().lower()
     if normalized == "metasploit":
-        return {
-            "MetasploitModule": len(
-                re.findall(r"(?m)^\s*class\s+MetasploitModule\b", content)
-            )
-        }
+        return {"MetasploitModule": len(re.findall(r"(?m)^\s*class\s+MetasploitModule\b", content))}
     if normalized in {"zap_active_scan", "zap_active"}:
         return {
-            "getMetadata": len(
-                re.findall(r"\bfunction\s+getMetadata\s*\(", content)
-            ),
+            "getMetadata": len(re.findall(r"\bfunction\s+getMetadata\s*\(", content)),
             "scan": len(
                 re.findall(
                     r"\bfunction\s+scan\s*\(\s*as\s*,\s*msg\s*,\s*param\s*,\s*value\s*\)",
@@ -101,9 +91,7 @@ def artifact_root_counts(content: str, artifact_type: str) -> dict[str, int]:
         }
     if normalized in {"zap_passive_scan", "zap_passive"}:
         return {
-            "getMetadata": len(
-                re.findall(r"\bfunction\s+getMetadata\s*\(", content)
-            ),
+            "getMetadata": len(re.findall(r"\bfunction\s+getMetadata\s*\(", content)),
             "scan": len(
                 re.findall(
                     r"\bfunction\s+scan\s*\(\s*ps\s*,\s*msg\s*,\s*src\s*\)",
@@ -133,9 +121,7 @@ def require_single_artifact(content: str, artifact_type: str) -> dict[str, int]:
             f"multiple Nuclei YAML documents; NucleiTemplate={nuclei_count}"
         )
     duplicate_zap = [
-        name
-        for name, count in counts.items()
-        if name != "NucleiTemplate" and count > 1
+        name for name, count in counts.items() if name != "NucleiTemplate" and count > 1
     ]
     if duplicate_zap:
         details = ", ".join(f"{name}={counts[name]}" for name in duplicate_zap)
@@ -146,9 +132,7 @@ def require_single_artifact(content: str, artifact_type: str) -> dict[str, int]:
     invalid = {name: count for name, count in counts.items() if count != 1}
     if invalid:
         details = ", ".join(f"{name}={count}" for name, count in invalid.items())
-        raise ArtifactEditError(
-            "artifact must contain exactly one complete root; " + details
-        )
+        raise ArtifactEditError("artifact must contain exactly one complete root; " + details)
     return counts
 
 
@@ -174,9 +158,7 @@ def apply_artifact_edits(
             f"Artifact edit base is stale: expected {actual_sha256}, received {base_sha256}"
         )
 
-    plan = parse_artifact_edit_plan(
-        json.dumps({"base_sha256": base_sha256, "edits": edits})
-    )
+    plan = parse_artifact_edit_plan(json.dumps({"base_sha256": base_sha256, "edits": edits}))
     normalized_edits = plan["edits"]
     if not isinstance(normalized_edits, list):
         raise ArtifactEditError("normalized edit plan is invalid")

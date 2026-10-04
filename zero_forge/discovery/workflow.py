@@ -309,9 +309,7 @@ def _apply_kev_context(
     enriched: list[KnownBugRecord] = []
     matched_cves: set[str] = set()
     for record in records:
-        record_ids = {
-            value.upper() for value in [record.advisory_id, *record.aliases] if value
-        }
+        record_ids = {value.upper() for value in [record.advisory_id, *record.aliases] if value}
         matching = next((kev_by_cve[cve] for cve in record_ids if cve in kev_by_cve), None)
         if matching is None:
             enriched.append(record)
@@ -373,9 +371,7 @@ def _collect_known_bugs(
                 name="osv_query",
                 arguments=osv_arguments,
             )
-            records.extend(
-                _advisory_records(result, source_name="osv_query", errors=errors)
-            )
+            records.extend(_advisory_records(result, source_name="osv_query", errors=errors))
 
         if request.seed_cve_ids or request.seed_ghsa_ids or package_name:
             github_arguments = {
@@ -639,9 +635,7 @@ def investigate_node(state: DiscoveryState, tool_runner: ToolRunner) -> dict[str
                     )
                 )
             else:
-                updated = hypothesis.model_copy(
-                    update={"status": HypothesisStatus.INCONCLUSIVE}
-                )
+                updated = hypothesis.model_copy(update={"status": HypothesisStatus.INCONCLUSIVE})
             updated_hypotheses.append(updated)
 
     except (LLMCallError, ToolAgentError) as exc:
@@ -786,6 +780,4 @@ def run_variant_analysis(
         return result
     if isinstance(result, dict):
         return DiscoveryState.model_validate(result)
-    raise TypeError(
-        f"LangGraph invoke() returned unexpected type {type(result).__name__}"
-    )
+    raise TypeError(f"LangGraph invoke() returned unexpected type {type(result).__name__}")

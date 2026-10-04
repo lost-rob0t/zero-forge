@@ -100,7 +100,7 @@ def _javascript_syntax_failure(content: str) -> dict[str, Any] | None:
 # Ruby AST analysis script using the standard-library Ripper parser.
 # Locates the MetasploitModule class node first, then inspects superclass,
 # required methods, and metadata keys ONLY inside that class body.
-_RIPPER_SCRIPT = r'''require 'ripper'
+_RIPPER_SCRIPT = r"""require 'ripper'
 require 'json'
 
 code = STDIN.read
@@ -227,7 +227,7 @@ puts JSON.generate({
   'has_exploit_method' => found['has_exploit_method'],
   'metadata_keys_found' => found['metadata_keys_found']
 })
-'''
+"""
 
 
 @runtime_checkable
@@ -297,9 +297,7 @@ class DefaultRubyRunner:
             Path(script_path).unlink(missing_ok=True)
 
 
-def validate_metasploit(
-    content: str, ruby_runner: RubyRunner | None = None
-) -> dict[str, Any]:
+def validate_metasploit(content: str, ruby_runner: RubyRunner | None = None) -> dict[str, Any]:
     """Validate a Metasploit exploit module.
 
     Uses a real Ruby syntax gate (``ruby -c``) followed by AST inspection
@@ -413,6 +411,7 @@ def validate_metasploit(
         warnings.append("Consider adding comments for maintainability")
 
     return {"is_valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+
 
 _ZAP_COMMON_METADATA_KEYS = (
     "id",
@@ -581,15 +580,14 @@ def _validate_zap_metadata(
                 "server, misc, or injection"
             )
 
+
 def _missing_tokens(code: str, requirements: dict[str, str], errors: list[str]) -> None:
     for token, message in requirements.items():
         if token not in code:
             errors.append(message)
 
 
-def _check_active_lifecycle_order(
-    code: str, errors: list[str], warnings: list[str]
-) -> None:
+def _check_active_lifecycle_order(code: str, errors: list[str], warnings: list[str]) -> None:
     """Enforce ordered clone→mutate→probe→inspect→alert lifecycle in active rules."""
     pos_clone = code.find("cloneRequest")
     pos_setparam = code.find("as.setParam")
@@ -699,12 +697,10 @@ _ZAP_PASSIVE_FORBIDDEN_PATTERNS: dict[str, str] = {
 }
 
 _ZAP_JAVA_NETWORK_RE = re.compile(
-    r'''Java\.type\s*\(\s*["'`]([^"'`]*(?:Network|Socket|Http|URL))'''
+    r"""Java\.type\s*\(\s*["'`]([^"'`]*(?:Network|Socket|Http|URL))"""
 )
 
-_ZAP_DYNAMIC_ACCESS_RE = re.compile(
-    r'''\b(?:ps|helper|msg|as)\s*\['''
-)
+_ZAP_DYNAMIC_ACCESS_RE = re.compile(r"""\b(?:ps|helper|msg|as)\s*\[""")
 
 
 def validate_zap_passive_scan(content: str) -> dict[str, Any]:

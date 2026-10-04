@@ -50,7 +50,9 @@ class FakeRubyRunner:
 
 
 class FakeMetasploitRunner:
-    def __init__(self, result=(0, "Module: exploit/zeroforge/generated_validation\n", ""), exc=None):
+    def __init__(
+        self, result=(0, "Module: exploit/zeroforge/generated_validation\n", ""), exc=None
+    ):
         self.result = result
         self.exc = exc
         self.calls = 0

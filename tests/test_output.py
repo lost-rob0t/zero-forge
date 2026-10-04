@@ -27,6 +27,7 @@ def _make_artifact(filename: str, cve_id: str | None = "CVE-2021-44228") -> Arti
 
 # --- Existing / valid cases ------------------------------------------------
 
+
 def test_save_artifact(tmp_path):
     art = _make_artifact("test_exploit.rb")
     path = save_artifact(art, output_dir=tmp_path)
@@ -83,6 +84,7 @@ def test_save_artifact_creates_dir(tmp_path):
 
 
 # --- Path traversal tests --------------------------------------------------
+
 
 def test_save_artifact_rejects_parent_traversal(tmp_path):
     art = _make_artifact("../escaped.rb")
@@ -332,9 +334,7 @@ def test_async_partial_publish_failure_cleans_entire_pair(tmp_path, monkeypatch)
     monkeypatch.setattr(output_module.os, "replace", fail_second_replace)
 
     with pytest.raises(ArtifactPathError, match="async artifact publish failure"):
-        asyncio.run(
-            save_artifact_async(_make_artifact("async_partial.rb"), output_dir=tmp_path)
-        )
+        asyncio.run(save_artifact_async(_make_artifact("async_partial.rb"), output_dir=tmp_path))
 
     assert list(tmp_path.iterdir()) == []
 

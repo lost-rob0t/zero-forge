@@ -9,10 +9,7 @@ from typing import Any
 
 OSV_QUERY_URL = "https://api.osv.dev/v1/query"
 GITHUB_ADVISORIES_URL = "https://api.github.com/advisories"
-CISA_KEV_URL = (
-    "https://www.cisa.gov/sites/default/files/feeds/"
-    "known_exploited_vulnerabilities.json"
-)
+CISA_KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 
 _USER_AGENT = "ZeroForge/0.1"
 _GITHUB_ECOSYSTEMS = {
@@ -148,11 +145,7 @@ def osv_query(
     if not isinstance(vulnerabilities, list):
         return []
     limit = _bounded_limit(max_results)
-    return [
-        _osv_record(item)
-        for item in vulnerabilities[:limit]
-        if isinstance(item, dict)
-    ]
+    return [_osv_record(item) for item in vulnerabilities[:limit] if isinstance(item, dict)]
 
 
 def _github_record(advisory: dict[str, Any]) -> dict[str, Any]:
@@ -177,12 +170,8 @@ def _github_record(advisory: dict[str, Any]) -> dict[str, Any]:
             {
                 "ecosystem": str(package.get("ecosystem", "")),
                 "name": str(package.get("name", "")),
-                "vulnerable_version_range": str(
-                    vulnerability.get("vulnerable_version_range", "")
-                ),
-                "first_patched_version": str(
-                    vulnerability.get("first_patched_version", "") or ""
-                ),
+                "vulnerable_version_range": str(vulnerability.get("vulnerable_version_range", "")),
+                "first_patched_version": str(vulnerability.get("first_patched_version", "") or ""),
             }
         )
         vulnerable_functions.extend(
@@ -304,13 +293,9 @@ def cisa_kev_lookup(
                 "cve_id": cve_id,
                 "vendor_project": str(vulnerability.get("vendorProject", "")),
                 "product": str(vulnerability.get("product", "")),
-                "vulnerability_name": str(
-                    vulnerability.get("vulnerabilityName", "")
-                ),
+                "vulnerability_name": str(vulnerability.get("vulnerabilityName", "")),
                 "date_added": str(vulnerability.get("dateAdded", "")),
-                "short_description": str(
-                    vulnerability.get("shortDescription", "")
-                ),
+                "short_description": str(vulnerability.get("shortDescription", "")),
                 "required_action": str(vulnerability.get("requiredAction", "")),
                 "known_ransomware_campaign_use": str(
                     vulnerability.get("knownRansomwareCampaignUse", "")

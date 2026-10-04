@@ -59,10 +59,7 @@ def _artifact_files(root: Path, artifact_type: ArtifactType) -> list[Path]:
     else:
         raise LabError(f"Unsupported artifact type for promotion: {artifact_type.value}")
     return sorted(
-        path
-        for suffix in suffixes
-        for path in root.rglob(f"*{suffix}")
-        if path.is_file()
+        path for suffix in suffixes for path in root.rglob(f"*{suffix}") if path.is_file()
     )
 
 

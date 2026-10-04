@@ -254,11 +254,7 @@ def publish_exploit_bundle(
     )
 
     final_artifact = tree["poc"] / filename
-    if (
-        not final_artifact.exists()
-        or not final_artifact.is_file()
-        or final_artifact.is_symlink()
-    ):
+    if not final_artifact.exists() or not final_artifact.is_file() or final_artifact.is_symlink():
         raise FileNotFoundError(f"completed artifact not found in poc/: {filename}")
 
     root = Path(output_dir).expanduser().resolve()

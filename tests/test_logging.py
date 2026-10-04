@@ -115,8 +115,10 @@ def test_setup_logging_idempotent_no_duplicate_handlers():
 
 def test_setup_logging_from_settings_defaults():
     from zero_forge.config import reset_settings
+
     reset_settings()
     from zero_forge.logging_config import setup_logging_from_settings
+
     setup_logging_from_settings()
     zf = logging.getLogger("zero_forge")
     io_logger = logging.getLogger("zero_forge.agents.llm")
@@ -128,8 +130,10 @@ def test_setup_logging_from_settings_env_override(monkeypatch):
     monkeypatch.setenv("ZERO_FORGE_LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("ZERO_FORGE_LOG_MODEL_IO_LEVEL", "INFO")
     from zero_forge.config import reset_settings
+
     reset_settings()
     from zero_forge.logging_config import setup_logging_from_settings
+
     setup_logging_from_settings()
     zf = logging.getLogger("zero_forge")
     io_logger = logging.getLogger("zero_forge.agents.llm")

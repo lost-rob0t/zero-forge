@@ -100,9 +100,7 @@ class AdvisoryRunner(RecordingRunner):
                         "aliases": ["CVE-2026-12345"],
                         "summary": "Sentinel handling can bypass validation",
                         "vulnerable_functions": ["normalize_index"],
-                        "source_url": (
-                            "https://github.com/advisories/GHSA-test-1234-5678"
-                        ),
+                        "source_url": ("https://github.com/advisories/GHSA-test-1234-5678"),
                     }
                 ],
             )
@@ -199,9 +197,7 @@ def test_variant_analysis_creates_only_awaiting_verification_candidate(tmp_path)
         "static_investigation_completed",
     ]
     assert all(len(request.allowed_tools) == 1 for request in runner.requests)
-    assert all(
-        request.arguments == request.locked_arguments for request in runner.requests
-    )
+    assert all(request.arguments == request.locked_arguments for request in runner.requests)
 
 
 def test_advisory_seed_is_enriched_and_passed_to_smart_agent(tmp_path):

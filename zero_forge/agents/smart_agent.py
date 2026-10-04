@@ -248,8 +248,7 @@ def _build_context_prompt(vuln: VulnerabilityInput, ctx: CollectedContext) -> st
             budget = 6000 if source_file.category == "documentation" else 4000
             label = source_file.category.upper() if source_file.category != "code" else "CODE"
             parts.append(
-                f"**[{label}] File: {source_file.filename}** "
-                f"(language: {source_file.language})"
+                f"**[{label}] File: {source_file.filename}** (language: {source_file.language})"
             )
             parts.append(f"```\n{source_file.content[:budget]}\n```")
     if ctx.extra_notes:
@@ -393,9 +392,7 @@ end"""
     else:
         helper = "as" if artifact_type == ArtifactType.ZAP_ACTIVE else "ps"
         signature = (
-            "as, msg, param, value"
-            if artifact_type == ArtifactType.ZAP_ACTIVE
-            else "ps, msg, src"
+            "as, msg, param, value" if artifact_type == ArtifactType.ZAP_ACTIVE else "ps, msg, src"
         )
         content = (
             "function getMetadata() { return null; }\n"

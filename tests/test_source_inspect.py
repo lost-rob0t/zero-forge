@@ -80,7 +80,7 @@ def test_non_code_files_read():
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "README.md").write_text("# Docs\n")
         (Path(tmpdir) / "requirements.txt").write_text("requests\n")
-        (Path(tmpdir) / "settings.json").write_text('{}')
+        (Path(tmpdir) / "settings.json").write_text("{}")
         results = read_source_files(tmpdir)
         readable = [r for r in results if not r.get("skipped")]
         assert len(readable) == 3
@@ -222,7 +222,9 @@ deleted file mode 100644
     assert result["files_changed"] == ["deleted.py"]
     assert result["deletions"] == 1
 
+
 # --- Security tests (issue #5) ------------------------------------------
+
 
 def test_symlink_not_followed():
     """Symlinks should be skipped in safe mode, not followed."""
@@ -254,7 +256,7 @@ def test_symlink_not_followed():
 
 
 def test_env_file_excluded():
-    """ .env files should be excluded in safe mode."""
+    """.env files should be excluded in safe mode."""
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "safe.py").write_text("x = 1\n")
         (Path(tmpdir) / ".env").write_text("API_KEY=supersecret123\n")
@@ -385,7 +387,7 @@ def test_is_secret_file_detection():
 
 
 def test_env_example_excluded_safe_mode():
-    """ .env.example should also be excluded in safe mode (templates may contain real secrets)."""
+    """.env.example should also be excluded in safe mode (templates may contain real secrets)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "app.py").write_text("x = 1\n")
         (Path(tmpdir) / ".env.example").write_text("API_KEY=example_key\n")
@@ -444,9 +446,7 @@ def test_search_code_safe_excludes_credential_file():
     """Safe code search must not return lines from credential files."""
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228 patch\n")
-        (Path(tmpdir) / "credentials.json").write_text(
-            '{"note":"2021-44228","token":"SECRET"}\n'
-        )
+        (Path(tmpdir) / "credentials.json").write_text('{"note":"2021-44228","token":"SECRET"}\n')
 
         results = search_code(tmpdir, "2021-44228")
         assert len(results) == 1
@@ -467,9 +467,7 @@ def test_search_code_safe_excludes_credential_file_fallback(monkeypatch):
 
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228 patch\n")
-        (Path(tmpdir) / "credentials.json").write_text(
-            '{"note":"2021-44228","token":"SECRET"}\n'
-        )
+        (Path(tmpdir) / "credentials.json").write_text('{"note":"2021-44228","token":"SECRET"}\n')
 
         results = search_code(tmpdir, "2021-44228")
         assert len(results) == 1
@@ -543,9 +541,7 @@ def test_search_code_unsafe_searches_all_files():
     """In unsafe mode, search_code should search all files including secrets."""
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
-        (Path(tmpdir) / "credentials.json").write_text(
-            '{"note":"2021-44228","token":"SECRET"}\n'
-        )
+        (Path(tmpdir) / "credentials.json").write_text('{"note":"2021-44228","token":"SECRET"}\n')
 
         results = search_code(tmpdir, "2021-44228", unsafe=True)
         paths = {r["path"] for r in results}
@@ -568,9 +564,7 @@ def test_search_code_allowed_paths_rejects_credential_file():
     """allowed_paths must not authorize credential files — intersect with admitted set."""
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
-        (Path(tmpdir) / "credentials.json").write_text(
-            '{"note":"2021-44228","token":"SECRET"}\n'
-        )
+        (Path(tmpdir) / "credentials.json").write_text('{"note":"2021-44228","token":"SECRET"}\n')
 
         cred_path = str(Path(tmpdir) / "credentials.json")
         results = search_code(tmpdir, "2021-44228", allowed_paths=[cred_path])
@@ -588,9 +582,7 @@ def test_search_code_allowed_paths_rejects_credential_file_fallback(monkeypatch)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         (Path(tmpdir) / "app.py").write_text("# CVE-2021-44228\n")
-        (Path(tmpdir) / "credentials.json").write_text(
-            '{"note":"2021-44228","token":"SECRET"}\n'
-        )
+        (Path(tmpdir) / "credentials.json").write_text('{"note":"2021-44228","token":"SECRET"}\n')
 
         cred_path = str(Path(tmpdir) / "credentials.json")
         results = search_code(tmpdir, "2021-44228", allowed_paths=[cred_path])
@@ -976,6 +968,4 @@ def test_search_code_excludes_truncation_entry_from_targets(monkeypatch):
         assert len(results) > 0
         # The <budget> path must NOT appear in any rg command args
         for args in captured_args:
-            assert "<budget>" not in args, (
-                "<budget> truncation entry leaked into rg_targets"
-            )
+            assert "<budget>" not in args, "<budget> truncation entry leaked into rg_targets"

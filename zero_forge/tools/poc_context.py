@@ -39,9 +39,7 @@ def _parse_sections(text: str) -> list[_PocSection]:
                 title="",
                 source="",
                 content=text.strip(),
-                cve_ids=tuple(
-                    sorted({value.upper() for value in _CVE_PATTERN.findall(text)})
-                ),
+                cve_ids=tuple(sorted({value.upper() for value in _CVE_PATTERN.findall(text)})),
                 endpoints=tuple(sorted(set(_ENDPOINT_PATTERN.findall(text)))),
                 index=0,
             )
@@ -51,19 +49,14 @@ def _parse_sections(text: str) -> list[_PocSection]:
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
         content = text[match.end() : end].strip()
-        metadata = {
-            key.lower(): value.strip()
-            for key, value in _METADATA_PATTERN.findall(content)
-        }
+        metadata = {key.lower(): value.strip() for key, value in _METADATA_PATTERN.findall(content)}
         sections.append(
             _PocSection(
                 identifier=f"exploitdb:{match.group('id')}",
                 title=metadata.get("title", ""),
                 source=metadata.get("source", ""),
                 content=content,
-                cve_ids=tuple(
-                    sorted({value.upper() for value in _CVE_PATTERN.findall(content)})
-                ),
+                cve_ids=tuple(sorted({value.upper() for value in _CVE_PATTERN.findall(content)})),
                 endpoints=tuple(sorted(set(_ENDPOINT_PATTERN.findall(content)))),
                 index=index,
             )
@@ -79,9 +72,7 @@ def _score(section: _PocSection, target_text: str) -> int:
     for endpoint in section.endpoints:
         if endpoint.lower() in target:
             score += 30
-    for version in set(
-        _VERSION_PATTERN.findall(f"{section.title}\n{section.content[:2000]}")
-    ):
+    for version in set(_VERSION_PATTERN.findall(f"{section.title}\n{section.content[:2000]}")):
         if version in target:
             score += 20
     for word in set(_WORD_PATTERN.findall(section.title.lower())):
@@ -154,14 +145,8 @@ def normalize_poc_context(
             "selected": False,
             "reason": "",
         }
-        if (
-            chosen_cves
-            and section.cve_ids
-            and set(section.cve_ids).isdisjoint(chosen_cves)
-        ):
-            record["reason"] = (
-                "excluded conflicting CVE group; selected " + ", ".join(chosen_cves)
-            )
+        if chosen_cves and section.cve_ids and set(section.cve_ids).isdisjoint(chosen_cves):
+            record["reason"] = "excluded conflicting CVE group; selected " + ", ".join(chosen_cves)
         else:
             key = _equivalence_key(section)
             if key in seen_keys:
@@ -191,8 +176,7 @@ def normalize_poc_context(
         record = records_by_id[section.identifier]
         if truncated:
             record["reason"] = (
-                str(record.get("reason", ""))
-                + "; truncated within per-section budget"
+                str(record.get("reason", "")) + "; truncated within per-section budget"
             )
         provenance = [f"ID: {section.identifier}"]
         if section.title:

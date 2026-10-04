@@ -47,9 +47,7 @@ def _validate_filename(filename: str) -> str:
 
     # Reject path separators (both Unix and Windows)
     if "/" in filename or "\\" in filename:
-        raise ArtifactPathError(
-            f"Artifact filename must not contain path separators: {filename!r}"
-        )
+        raise ArtifactPathError(f"Artifact filename must not contain path separators: {filename!r}")
 
     # Reject parent directory references
     if ".." in filename:
@@ -59,16 +57,12 @@ def _validate_filename(filename: str) -> str:
 
     # Reject absolute paths (Unix and Windows drive letters)
     if Path(filename).is_absolute() or re.match(r"^[A-Za-z]:", filename):
-        raise ArtifactPathError(
-            f"Artifact filename must not be an absolute path: {filename!r}"
-        )
+        raise ArtifactPathError(f"Artifact filename must not be an absolute path: {filename!r}")
 
     # Final safety: extract basename
     basename = Path(filename).name
     if not basename or basename in (".", ".."):
-        raise ArtifactPathError(
-            f"Artifact filename resolves to an unsafe basename: {filename!r}"
-        )
+        raise ArtifactPathError(f"Artifact filename resolves to an unsafe basename: {filename!r}")
 
     return basename
 
@@ -89,9 +83,7 @@ def _safe_resolve(output_root: Path, filename: str) -> Path:
 
     # Reject symlinks before resolving so the link target cannot escape
     if candidate.is_symlink():
-        raise ArtifactPathError(
-            f"Artifact destination must not be a symlink: {candidate}"
-        )
+        raise ArtifactPathError(f"Artifact destination must not be a symlink: {candidate}")
 
     destination = candidate.resolve()
 
@@ -195,9 +187,7 @@ def save_artifact(artifact: Artifact, output_dir: Path | str | None = None) -> s
     meta_path = _safe_resolve(out_path, meta_name)
 
     # Filter reserved keys from user metadata to prevent sidecar spoofing
-    user_meta = {
-        k: v for k, v in artifact.metadata.items() if k not in _RESERVED_META_KEYS
-    }
+    user_meta = {k: v for k, v in artifact.metadata.items() if k not in _RESERVED_META_KEYS}
     meta = {
         "artifact_type": artifact.artifact_type.value,
         "filename": filepath.name,
@@ -240,9 +230,7 @@ def save_artifact(artifact: Artifact, output_dir: Path | str | None = None) -> s
     return str(filepath.resolve())
 
 
-async def save_artifact_async(
-    artifact: Artifact, output_dir: Path | str | None = None
-) -> str:
+async def save_artifact_async(artifact: Artifact, output_dir: Path | str | None = None) -> str:
     """Save an artifact without blocking the event loop.
 
     The complete synchronous transaction runs in one worker thread so its

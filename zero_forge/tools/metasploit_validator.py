@@ -32,9 +32,7 @@ _FAILURE_PATTERNS = (
     re.compile(r"(?mi)^\s*\[-\]\s+.*(?:failed|error|invalid|unable)"),
 )
 _ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-_SUCCESS_PATTERN = re.compile(
-    rf"(?mi)^\s*Module:\s+{re.escape(_VALIDATION_MODULE)}\s*$"
-)
+_SUCCESS_PATTERN = re.compile(rf"(?mi)^\s*Module:\s+{re.escape(_VALIDATION_MODULE)}\s*$")
 _BASE64_TRANSPORT_PATTERN = re.compile(
     r"(?:\.pack\(\s*['\"]m0['\"]\s*\)|strict_encode64|encode_base64|Base64\.)"
 )

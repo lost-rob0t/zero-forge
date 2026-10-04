@@ -93,9 +93,7 @@ class VariantAnalysisRequest(StrictModel):
             )
         )
         if not has_seed:
-            raise ValueError(
-                "seed_summary, seed_diff, advisory IDs, or a package seed is required"
-            )
+            raise ValueError("seed_summary, seed_diff, advisory IDs, or a package seed is required")
         return self
 
 
