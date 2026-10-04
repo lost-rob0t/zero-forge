@@ -41,6 +41,9 @@ jobs:
           fi
           exit "$ruff_status"
 
+      - name: Check formatting with ruff
+        run: uv run ruff format --check .
+
       - name: Upload Ruff diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
