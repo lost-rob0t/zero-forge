@@ -84,7 +84,17 @@ Set a provider key:
 
 ```bash
 export OPENROUTER_API_KEY='sk-or-...'
+# or OpenAI / Anthropic:
+export OPENAI_API_KEY='sk-...'
+export ANTHROPIC_API_KEY='sk-ant-...'
+# or a Z.ai GLM Coding Plan subscription:
+export ZAI_API_KEY='sk-...'
 ```
+
+With `provider: "zai"` (or when no other provider key is set and `ZAI_API_KEY`
+is present), requests route through LiteLLM's `zai/` provider against the GLM
+Coding Plan endpoint (`https://api.z.ai/api/coding/paas/v4`). Override the
+endpoint per role with `base_url` if needed.
 
 ZeroForge automatically loads a `.env` file from the working directory before resolving settings. Shell variables always take precedence over `.env` values. To use a custom path:
 

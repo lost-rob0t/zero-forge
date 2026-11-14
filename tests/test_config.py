@@ -170,10 +170,12 @@ def test_env_api_keys(clean_env, monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-123")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-oai-456")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-789")
+    monkeypatch.setenv("ZAI_API_KEY", "sk-zai-012")
     settings = load_config()
     assert settings.openrouter_api_key == "sk-or-123"
     assert settings.openai_api_key == "sk-oai-456"
     assert settings.anthropic_api_key == "sk-ant-789"
+    assert settings.zai_api_key == "sk-zai-012"
 
 
 def test_singleton_caching(clean_env):

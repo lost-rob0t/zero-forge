@@ -31,6 +31,7 @@ def _disable_provider_keys(monkeypatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
 
 
 def test_workflow_builds():

@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class ModelConfig(BaseModel):
     """Configuration for one model role."""
 
-    provider: Literal["auto", "openrouter", "openai", "anthropic"] = "auto"
+    provider: Literal["auto", "openrouter", "openai", "anthropic", "zai"] = "auto"
     model: str = Field(default="gpt-4o", min_length=1)
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, ge=1)
@@ -117,6 +117,7 @@ class Settings(BaseModel):
     openrouter_api_key: str = Field(default="", repr=False)
     openai_api_key: str = Field(default="", repr=False)
     anthropic_api_key: str = Field(default="", repr=False)
+    zai_api_key: str = Field(default="", repr=False)
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
@@ -145,6 +146,7 @@ _ENV_MAP: dict[str, str] = {
     "OPENROUTER_API_KEY": "openrouter_api_key",
     "OPENAI_API_KEY": "openai_api_key",
     "ANTHROPIC_API_KEY": "anthropic_api_key",
+    "ZAI_API_KEY": "zai_api_key",
 }
 
 _LEGACY_ENV_VARS = {
@@ -244,10 +246,11 @@ DEFAULT_CONFIG_TEMPLATE = """\
 #   export OPENROUTER_API_KEY="sk-..."
 #   export OPENAI_API_KEY="sk-..."
 #   export ANTHROPIC_API_KEY="sk-..."
+#   export ZAI_API_KEY="sk-..."
 
 models:
   smart:
-    provider: "auto"            # auto, openrouter, openai, or anthropic
+    provider: "auto"            # auto, openrouter, openai, anthropic, or zai
     model: "gpt-4o"             # reasoning and artifact-writing model
     temperature: 0.3
     max_tokens: 4096

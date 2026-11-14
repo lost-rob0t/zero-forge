@@ -141,6 +141,7 @@ def test_missing_credentials_fail_closed(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
 
     with pytest.raises(LLMConfigurationError) as caught:
         _call_llm("system", "user")
@@ -334,6 +335,7 @@ def test_explicit_stub_mode_marks_artifact(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
 
     artifact = generate_artifact(
         VulnerabilityInput(cve_id="CVE-2021-44228"),
@@ -465,6 +467,7 @@ def test_generate_artifact_uses_timestamp_filename_when_no_cve(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
 
     ctx = CollectedContext(cve_id="")
     artifact = generate_artifact(VulnerabilityInput(cve_id=""), ctx)
@@ -479,6 +482,7 @@ def test_resolve_provider_openrouter(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
     monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "meta-llama/llama-3-70b-instruct")
 
     api_key, model, extra = _resolve_provider()
@@ -502,6 +506,7 @@ def test_resolve_provider_openrouter_base_url(monkeypatch):
     monkeypatch.setenv("ZERO_FORGE_SMART_BASE_URL", "https://custom.openrouter.proxy/v1")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
 
     api_key, _model, extra = _resolve_provider()
     assert api_key == "sk-or-test"
@@ -512,6 +517,7 @@ def test_resolve_provider_openai_fallback(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
     monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "gpt-4o")
 
     api_key, model, _ = _resolve_provider()
@@ -536,6 +542,7 @@ def test_repair_artifact_marks_stub_when_stub_mode(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
 
     original = Artifact(
         artifact_type=ArtifactType.METASPLOIT,
@@ -574,10 +581,62 @@ def test_repair_artifact_preserves_stub_false_when_not_stub_mode(monkeypatch):
     assert repaired.metadata["repaired"] is True
 
 
+def test_resolve_provider_zai(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ZAI_API_KEY", "sk-zai-test")
+    monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "glm-4.7")
+
+    api_key, model, extra = _resolve_provider()
+    assert api_key == "sk-zai-test"
+    assert model == "zai/glm-4.7"
+    assert extra["api_base"] == "https://api.z.ai/api/coding/paas/v4"
+
+
+def test_resolve_provider_zai_explicit_overrides_auto(monkeypatch):
+    """Explicit zai provider wins even when an OpenRouter key exists."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setenv("ZAI_API_KEY", "sk-zai-test")
+    monkeypatch.setenv("ZERO_FORGE_SMART_PROVIDER", "zai")
+    monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "glm-4.7")
+
+    api_key, model, _ = _resolve_provider()
+    assert api_key == "sk-zai-test"
+    assert model == "zai/glm-4.7"
+
+
+def test_resolve_provider_zai_base_url_override(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ZAI_API_KEY", "sk-zai-test")
+    monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "glm-4.7")
+    monkeypatch.setenv("ZERO_FORGE_SMART_BASE_URL", "https://custom.zai.proxy/v1")
+
+    api_key, _model, extra = _resolve_provider()
+    assert api_key == "sk-zai-test"
+    assert extra["api_base"] == "https://custom.zai.proxy/v1"
+
+
+def test_resolve_provider_zai_fallback_after_anthropic(monkeypatch):
+    """Auto resolution prefers existing providers before zai."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic")
+    monkeypatch.setenv("ZAI_API_KEY", "sk-zai-test")
+    monkeypatch.setenv("ZERO_FORGE_SMART_MODEL", "glm-4.7")
+
+    api_key, model, _ = _resolve_provider()
+    assert api_key == "sk-anthropic"
+    assert model == "anthropic/glm-4.7"
+
+
 def test_resolve_provider_without_key(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
 
     api_key, _model, _ = _resolve_provider()
     assert api_key is None
@@ -664,6 +723,7 @@ def test_generate_artifact_async_stub_mode(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
 
     artifact = asyncio.run(generate_artifact_async(
         VulnerabilityInput(cve_id="CVE-2021-44228"),
@@ -769,6 +829,7 @@ def test_repair_artifact_async_stub_mode(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
 
     original = Artifact(
         artifact_type=ArtifactType.METASPLOIT,

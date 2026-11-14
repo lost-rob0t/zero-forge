@@ -74,7 +74,7 @@ def resolve_model_limits(model: str, provider: str, api_key: str | None) -> int 
     result: int | None = None
     if provider == "openrouter":
         result = _resolve_openrouter_limit(model)
-    elif provider in ("openai", "anthropic"):
+    elif provider in ("openai", "anthropic", "zai"):
         result = _resolve_litellm_limit(model)
 
     _MODEL_LIMITS_CACHE[cache_key] = result
@@ -146,18 +146,22 @@ class LLMResponseError(LLMCallError):
     code = "llm_response_error"
 
 
+_ZAI_CODING_PLAN_BASE_URL = "https://api.z.ai/api/coding/paas/v4"
+
+
 def _provider_key(settings: Settings, provider: str) -> str:
     return {
         "openrouter": settings.openrouter_api_key,
         "openai": settings.openai_api_key,
         "anthropic": settings.anthropic_api_key,
+        "zai": settings.zai_api_key,
     }[provider]
 
 
 def _choose_provider(settings: Settings, config: ModelConfig) -> str:
     if config.provider != "auto":
         return config.provider
-    for provider in ("openrouter", "openai", "anthropic"):
+    for provider in ("openrouter", "openai", "anthropic", "zai"):
         if _provider_key(settings, provider):
             return provider
     return "none"
@@ -173,10 +177,15 @@ def resolve_model(role: str, config: ModelConfig) -> ResolvedModel:
         model = f"openrouter/{model}"
     if provider == "anthropic" and not model.startswith("anthropic/"):
         model = f"anthropic/{model}"
+    if provider == "zai" and not model.startswith("zai/"):
+        model = f"zai/{model}"
 
     extra_kwargs: dict[str, str] = {}
     if config.base_url:
         extra_kwargs["api_base"] = config.base_url
+    elif provider == "zai":
+        # GLM Coding Plan subscriptions use the dedicated coding endpoint.
+        extra_kwargs["api_base"] = _ZAI_CODING_PLAN_BASE_URL
 
     api_key = None if provider == "none" else _provider_key(settings, provider)
     return ResolvedModel(
@@ -425,7 +434,7 @@ async def resolve_model_limits_async(
     result: int | None = None
     if provider == "openrouter":
         result = await _resolve_openrouter_limit_async(model)
-    elif provider in ("openai", "anthropic"):
+    elif provider in ("openai", "anthropic", "zai"):
         result = _resolve_litellm_limit(model)
 
     _MODEL_LIMITS_CACHE[cache_key] = result

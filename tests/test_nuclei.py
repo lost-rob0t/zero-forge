@@ -223,6 +223,7 @@ def test_nuclei_workflow_does_not_require_node(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
     monkeypatch.setenv("ZERO_FORGE_OUTPUT_DIR", str(tmp_path))
     monkeypatch.setattr(
         "zero_forge.workflow.ToolAgent.collect_context",
