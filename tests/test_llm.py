@@ -31,6 +31,7 @@ def clean_env(monkeypatch):
             "OPENROUTER_API_KEY",
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
+            "ZAI_API_KEY",
         ):
             monkeypatch.delenv(key, raising=False)
     return monkeypatch
